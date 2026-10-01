@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tako banner</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 1280px; height: 420px; overflow: hidden; background: #08090b; }
+      body {
+        font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+        color: #f4f5f7;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        position: relative;
+        width: 1280px;
+        height: 420px;
+        display: grid;
+        grid-template-columns: 420px 1fr;
+        align-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(600px 380px at 18% 55%, rgba(255, 122, 89, 0.22), transparent 70%),
+          radial-gradient(520px 360px at 92% 10%, rgba(255, 77, 141, 0.16), transparent 70%),
+          linear-gradient(180deg, #0c0d10, #08090b);
+      }
+      .grid {
+        position: absolute;
+        inset: 0;
+        background-image: linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+        background-size: 40px 40px;
+        mask-image: radial-gradient(800px 420px at 40% 50%, #000 30%, transparent 80%);
+      }
+      .left { position: relative; display: grid; place-items: center; }
+      .left { height: 420px; }
+      .island {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 300px;
+        height: 38px;
+        border-radius: 0 0 20px 20px;
+        background: #000;
+        box-shadow: 0 14px 40px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.06);
+      }
+      .island::after {
+        content: "";
+        position: absolute;
+        right: 22px;
+        top: 14px;
+        width: 30px;
+        height: 10px;
+        border-radius: 5px;
+        background: linear-gradient(90deg, #34d399, #3b9eff);
+        opacity: 0.85;
+      }
+      #blob { margin-top: -40px; }
+      .left canvas { position: relative; filter: drop-shadow(0 22px 34px rgba(0,0,0,0.55)); }
+      .right { position: relative; padding-right: 70px; }
+      h1 {
+        font-size: 96px;
+        line-height: 1;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        background: linear-gradient(135deg, #ffb08f 0%, #ff7a59 40%, #ff4d8d 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      p.tag {
+        margin-top: 14px;
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: #e8e9ec;
+      }
+      p.sub {
+        margin-top: 8px;
+        font-size: 17px;
+        color: #8c919b;
+      }
+      .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        font: 600 14px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+        color: #d6d8de;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.09);
+      }
+      .chip svg { color: #ff7a59; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="grid"></div>
+      <div class="left"><div class="island"></div><div id="blob"></div></div>
+      <div class="right">
+        <h1>Tako</h1>
+        <p class="tag">Watch Claude Code work — live, at the top of your screen.</p>
+        <p class="sub">Numbered diffs, commands, plans, one-click permissions — and a chat that can see your screen.</p>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+    <script type="module" src="./banner.ts"></script>
+  </body>
+</html>

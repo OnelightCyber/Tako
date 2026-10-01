@@ -1,0 +1,719 @@
+import "./settings.css";
+import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import { Sound } from "../core/sound";
+import { DEFAULT_SETTINGS, type Settings } from "../core/state";
+import { h, clear } from "../views/dom";
+import { proIcon, type ProIconName } from "../views/pro-icons";
+import { brandLogo } from "../views/brand-logos";
+import { blob } from "./blob";
+
+type PageId = "home" | "claude" | "chat" | "integrations" | "island" | "about";
+
+interface Ctx {
+  settings: Settings;
+  version: string;
+  hooks: HookStatus;
+  cc: { found: boolean; path: string; version: string };
+  hasKey: boolean;
+  present: Record<string, boolean>;
+}
+
+const REPO_URL = "https://github.com/OnelightCyber/Tako";
+
+const PAGES: { id: PageId; label: string; icon: ProIconName }[] = [
+  { id: "home", label: "Accueil", icon: "home" },
+  { id: "claude", label: "Claude Code", icon: "code" },
+  { id: "chat", label: "Chat & agent", icon: "chat" },
+  { id: "integrations", label: "Intégrations", icon: "plug" },
+  { id: "island", label: "Îlot & sons", icon: "sliders" },
+  { id: "about", label: "À propos", icon: "info" },
+];
+
+interface IntegrationDef {
+  id: string;
+  name: string;
+  color: string;
+  blurb: string;
+  fields: { key: string; label: string; placeholder: string; secret: boolean }[];
+}
+
+const INTEGRATIONS: IntegrationDef[] = [
+  { id: "integration_github", name: "GitHub", color: "#F4505E", blurb: "PR, issues et CI de tes repos",
+    fields: [{ key: "github-token", label: "Token", placeholder: "ghp_…", secret: true }] },
+  { id: "integration_vercel", name: "Vercel", color: "#7C5CFF", blurb: "Déploiements en cours et en échec",
+    fields: [{ key: "vercel-token", label: "Token", placeholder: "…", secret: true }] },
+  { id: "integration_n8n", name: "n8n", color: "#F29B38", blurb: "Exécutions de tes workflows",
+    fields: [
+      { key: "n8n-url", label: "URL de l'instance", placeholder: "https://n8n.exemple.com", secret: false },
+      { key: "n8n-api-key", label: "Clé API", placeholder: "…", secret: true },
+    ] },
+  { id: "integration_resend", name: "Resend", color: "#22C55E", blurb: "Emails envoyés et rebonds",
+    fields: [{ key: "resend-api-key", label: "Clé API", placeholder: "re_…", secret: true }] },
+  { id: "integration_notion", name: "Notion", color: "#A3A3A3", blurb: "Pages modifiées récemment",
+    fields: [{ key: "notion-api-key", label: "Token d'intégration", placeholder: "ntn_…", secret: true }] },
+  { id: "integration_calcom", name: "Cal.com", color: "#C9956A", blurb: "Tes prochains rendez-vous",
+    fields: [{ key: "calcom-api-key", label: "Clé API", placeholder: "cal_…", secret: true }] },
+  { id: "integration_stripe", name: "Stripe", color: "#635BFF", blurb: "Paiements reçus en direct",
+    fields: [{ key: "stripe-api-key", label: "Clé restreinte", placeholder: "rk_live_…", secret: true }] },
+];
+
+const MAX_ACTIVE = 4;
+
+const MODELS: [string, string][] = [
+  ["claude-opus-5-5", "Claude Opus 5.5"],
+  ["claude-sonnet-5-5", "Claude Sonnet 5.5"],
+  ["claude-haiku-4-5", "Claude Haiku 4.5"],
+];
+
+const root = document.getElementById("settings-root")!;
+let ctx: Ctx;
+let current: PageId = "home";
+const pageHost = h("main", { class: "content" });
+const navHost = h("nav", { class: "nav-items" });
+const footHost = h("div", { class: "nav-foot" });
+const toastEl = h("div", { class: "toast" });
+let toastTimer: number | null = null;
+let pendingUpdate: { version: string; current: string; notes: string } | null = null;
+
+function toast(text: string, kind: "ok" | "err" = "ok") {
+  clear(toastEl);
+  toastEl.append(proIcon(kind === "ok" ? "check" : "x", 14, 2.2), h("span", { text }));
+  toastEl.className = `toast show ${kind}`;
+  if (toastTimer != null) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (toastEl.className = `toast ${kind}`), 2200);
+}
+
+async function save(message = "Enregistré") {
+  await Bridge.saveSettings(ctx.settings);
+  toast(message);
+  renderFoot();
+}
+
+function toggle(on: boolean, onChange: (v: boolean) => void, disabled = false): HTMLElement {
+  const el = h("button", { class: on ? "switch on" : "switch", role: "switch", "aria-checked": on });
+  if (disabled) el.setAttribute("disabled", "");
+  el.addEventListener("click", () => {
+    const next = !el.classList.contains("on");
+    el.classList.toggle("on", next);
+    el.setAttribute("aria-checked", String(next));
+    onChange(next);
+  });
+  return el;
+}
+
+function pill(ok: boolean | "warn", text: string): HTMLElement {
+  const kind = ok === "warn" ? "warn" : ok ? "ok" : "off";
+  return h("span", { class: `pill ${kind}` }, h("i"), h("span", { text }));
+}
+
+function row(title: string, desc: string | null, control: Node, iconName?: ProIconName): HTMLElement {
+  return h(
+    "div",
+    { class: "row" },
+    iconName ? h("div", { class: "row-icon" }, proIcon(iconName, 16)) : null,
+    h("div", { class: "row-text" }, h("div", { class: "row-title", text: title }), desc ? h("div", { class: "row-desc", text: desc }) : null),
+    h("div", { class: "row-control" }, control),
+  );
+}
+
+function card(...children: (Node | null)[]): HTMLElement {
+  return h("section", { class: "card" }, ...children);
+}
+
+function cardHead(title: string, right?: Node, iconName?: ProIconName): HTMLElement {
+  return h(
+    "div",
+    { class: "card-head" },
+    h("div", { class: "card-title" }, iconName ? h("span", { class: "card-icon" }, proIcon(iconName, 15)) : null, h("h3", { text: title })),
+    right ?? null,
+  );
+}
+
+function pageHeader(title: string, subtitle: string): HTMLElement {
+  return h("header", { class: "page-head" }, h("h1", { text: title }), h("p", { text: subtitle }));
+}
+
+function button(label: string, kind: "primary" | "ghost" | "danger" | "" , onClick: () => void, iconName?: ProIconName): HTMLButtonElement {
+  const el = h("button", { class: `btn ${kind}` }, iconName ? proIcon(iconName, 15) : null, h("span", { text: label })) as HTMLButtonElement;
+  el.addEventListener("click", onClick);
+  return el;
+}
+
+function renderDiff(text: string): HTMLElement {
+  const box = h("div", { class: "diff" });
+  for (const line of text.split("\n")) {
+    const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
+    box.append(h("div", { class: cls, text: line || " " }));
+  }
+  return box;
+}
+
+function activeCount(): number {
+  return ctx.settings.activeIntegrations.length;
+}
+
+function chatMode(): { label: string; ok: boolean | "warn" } {
+  if (ctx.cc.found) return { label: "Ton compte Claude Code", ok: true };
+  if (ctx.hasKey) return { label: "Clé API", ok: true };
+  return { label: "Non configuré", ok: false };
+}
+
+function renderNav() {
+  clear(navHost);
+  for (const page of PAGES) {
+    const btn = h("button", { class: page.id === current ? "nav-item on" : "nav-item" }, proIcon(page.icon, 17), h("span", { text: page.label }));
+    if (page.id === "claude" && !ctx.hooks.installed) btn.append(h("i", { class: "nav-badge" }));
+    if (page.id === "about" && pendingUpdate) btn.append(h("i", { class: "nav-badge update" }));
+    btn.addEventListener("click", () => go(page.id));
+    navHost.append(btn);
+  }
+}
+
+function renderFoot() {
+  clear(footHost);
+  const ready = ctx.hooks.installed && (ctx.cc.found || ctx.hasKey);
+  footHost.append(
+    pill(ready ? true : "warn", ready ? "Tout est branché" : "Une étape à faire"),
+    h("div", { class: "foot-ver", text: `Tako ${ctx.version}` }),
+  );
+}
+
+function go(id: PageId) {
+  current = id;
+  renderNav();
+  clear(pageHost);
+  const page = h("div", { class: "page" });
+  page.append(...buildPage(id));
+  pageHost.append(page);
+  pageHost.scrollTop = 0;
+}
+
+function buildPage(id: PageId): Node[] {
+  switch (id) {
+    case "home": return homePage();
+    case "claude": return claudePage();
+    case "chat": return chatPage();
+    case "integrations": return integrationsPage();
+    case "island": return islandPage();
+    case "about": return aboutPage();
+  }
+}
+
+function homePage(): Node[] {
+  const ready = ctx.hooks.installed;
+  const hero = h(
+    "section",
+    { class: "hero" },
+    h("div", { class: "hero-glow" }),
+    h("div", { class: "hero-text" },
+      h("div", { class: "hero-kicker" }, h("i"), h("span", { text: ready ? "En ligne" : "Presque prêt" })),
+      h("h2", { text: ready ? "Tako veille sur Claude Code." : "Branche Claude Code pour réveiller Tako." }),
+      h("p", { text: ready
+        ? "Chaque fichier lu, chaque diff, chaque commande s'affiche en direct dans l'îlot. Les permissions se valident d'un clic."
+        : "Une seule étape : installer les hooks. Tu vois exactement ce qui change dans ta config avant que rien ne soit écrit." }),
+      h("div", { class: "hero-actions" },
+        ready
+          ? button("Ouvrir l'îlot", "primary", () => void Bridge.showIsland(), "play")
+          : button("Installer les hooks", "primary", () => go("claude"), "bolt"),
+        button("Dossier Tako", "ghost", () => void Bridge.openTakoFolder(), "folder"),
+      ),
+    ),
+    h("div", { class: "hero-art" }, blob(96, { particles: true, interactive: true })),
+  );
+
+  const mode = chatMode();
+  const tiles = h(
+    "div",
+    { class: "tiles" },
+    tile("code", "Hooks Claude Code", ctx.hooks.installed ? "Installés" : "À installer", ctx.hooks.installed, () => go("claude")),
+    tile("terminal", "Claude Code", ctx.cc.found ? (ctx.cc.version.split(" ")[0] || "Détecté") : "Introuvable", ctx.cc.found, () => go("claude")),
+    tile("chat", "Chat", mode.label, mode.ok, () => go("chat")),
+    tile("globe", "Agent navigateur", ctx.settings.chatAgent ? "Activé" : "Désactivé", ctx.settings.chatAgent ? true : "warn", () => go("chat")),
+    tile("monitor", "Vision de l'écran", ctx.settings.chatScreen ? "Activée" : "Désactivée", ctx.settings.chatScreen ? true : "warn", () => go("chat")),
+    tile("plug", "Intégrations", `${activeCount()} / ${MAX_ACTIVE} actives`, activeCount() > 0 ? true : "warn", () => go("integrations")),
+  );
+
+  const tips = card(
+    cardHead("Dans l'îlot", undefined, "layers"),
+    h("div", { class: "keys" },
+      key("Survol", "en haut au centre fait sortir l'îlot"),
+      key("Clic sur une étape", "affiche son diff, sa sortie ou son plan"),
+      key("Y / N", "Allow / Deny sur une permission"),
+      key("/", "dans le chat, propose les commandes Claude"),
+      key("Échap", "referme l'îlot"),
+      key("Glisser un fichier", "le dépose dans le chat"),
+    ),
+  );
+
+  return [pageHeader("Accueil", "L'état de Tako en un coup d'œil."), hero, tiles, tips];
+}
+
+function tile(iconName: ProIconName, title: string, value: string, ok: boolean | "warn", onClick: () => void): HTMLElement {
+  const kind = ok === "warn" ? "warn" : ok ? "ok" : "off";
+  const el = h("button", { class: `tile ${kind}` },
+    h("div", { class: "tile-top" }, h("span", { class: "tile-icon" }, proIcon(iconName, 16)), h("i", { class: "tile-dot" })),
+    h("div", { class: "tile-title", text: title }),
+    h("div", { class: "tile-value", text: value }),
+  );
+  el.addEventListener("click", onClick);
+  return el;
+}
+
+function key(k: string, what: string): HTMLElement {
+  return h("div", { class: "key" }, h("kbd", { text: k }), h("span", { text: what }));
+}
+
+function claudePage(): Node[] {
+  const hookCard = card();
+
+  const draw = () => {
+    clear(hookCard);
+    hookCard.append(
+      cardHead("Hooks", pill(ctx.hooks.installed, ctx.hooks.installed ? "Installés" : "Non installés"), "bolt"),
+      h("p", { class: "muted", text: ctx.hooks.installed
+        ? "Tako reçoit les événements de toutes tes sessions Claude Code, depuis n'importe quel terminal."
+        : "Installe les hooks pour voir tes sessions dans l'îlot et valider les permissions sans quitter ce que tu fais." }),
+      h("div", { class: "kv" },
+        h("span", { text: "settings.json" }), h("code", { text: ctx.hooks.settingsPath || "—" }),
+        h("span", { text: "Relais" }), h("code", { text: ctx.hooks.hookPath || "—" }),
+      ),
+    );
+    if (!ctx.hooks.hookReady) {
+      hookCard.append(h("div", { class: "notice warn", text: "tako-hook.exe n'est pas encore en place. Relance Tako ; si ça persiste, compile-le avec cargo build -p tako-hook." }));
+    }
+    const install = button(ctx.hooks.installed ? "Réinstaller…" : "Installer les hooks…", "primary", () => void preview(true), "bolt");
+    if (!ctx.hooks.hookReady) install.setAttribute("disabled", "");
+    const actions = h("div", { class: "actions" }, install);
+    if (ctx.hooks.installed) actions.append(button("Désinstaller…", "danger", () => void preview(false), "x"));
+    hookCard.append(actions);
+  };
+
+  const preview = async (install: boolean) => {
+    let plan;
+    try {
+      plan = await Bridge.hooksPreview(install);
+    } catch (err) {
+      clear(hookCard);
+      hookCard.append(
+        cardHead("Hooks", undefined, "bolt"),
+        h("div", { class: "notice err", text: String(err).replace(/^Error:\s*/, "") }),
+        h("div", { class: "actions" }, button("Retour", "ghost", draw)),
+      );
+      return;
+    }
+    if (!plan) return;
+    clear(hookCard);
+    const confirm = button(install ? "Sauvegarder et écrire" : "Sauvegarder et retirer", install ? "primary" : "danger", async () => {
+      confirm.setAttribute("disabled", "");
+      try {
+        const backup = await Bridge.hooksApply(install, plan.fingerprint);
+        const fresh = await Bridge.hooksStatus();
+        if (fresh) ctx.hooks = fresh;
+        toast(install ? "Hooks installés" : "Hooks retirés");
+        draw();
+        hookCard.append(h("div", { class: "notice ok", text: `Ancienne config sauvegardée : ${backup}. Ouvre une nouvelle session Claude Code pour en profiter.` }));
+        renderNav();
+        renderFoot();
+      } catch (err) {
+        confirm.removeAttribute("disabled");
+        hookCard.append(h("div", { class: "notice err", text: `Écriture impossible : ${String(err)}` }));
+      }
+    }, "check");
+    hookCard.append(
+      cardHead(install ? "Ce qui va changer" : "Ce qui va être retiré", undefined, "file"),
+      h("p", { class: "muted", text: install
+        ? "Exactement ce qui sera écrit dans ton settings.json. Tes propres hooks ne sont pas touchés."
+        : "Seules les entrées de Tako partent. Tes propres hooks restent." }),
+      renderDiff(plan.diff),
+      h("div", { class: "kv" }, h("span", { text: "Sauvegarde" }), h("code", { text: plan.backup })),
+      h("div", { class: "actions" }, confirm, button("Annuler", "ghost", draw)),
+    );
+  };
+
+  draw();
+
+  const behaviour = card(
+    cardHead("Comportement", undefined, "sliders"),
+    row("Ouvrir l'îlot quand Claude a fini", "Sinon une simple pastille verte, sans rien ouvrir — idéal en jeu.",
+      toggle(ctx.settings.openOnFinish, (v) => { ctx.settings.openOnFinish = v; void save(); }), "eye"),
+  );
+
+  const binary = card(
+    cardHead("Claude Code sur ce PC", pill(ctx.cc.found, ctx.cc.found ? "Détecté" : "Introuvable"), "terminal"),
+    ctx.cc.found
+      ? h("div", { class: "kv" },
+        h("span", { text: "Version" }), h("code", { text: ctx.cc.version || "—" }),
+        h("span", { text: "Exécutable" }), h("code", { text: ctx.cc.path }))
+      : h("p", { class: "muted", text: "Installe Claude Code (npm i -g @anthropic-ai/claude-code) puis relance Tako." }),
+  );
+
+  return [pageHeader("Claude Code", "Ce qui relie Tako à tes sessions."), hookCard, behaviour, binary];
+}
+
+function chatPage(): Node[] {
+  const mode = chatMode();
+  const backend = card(
+    cardHead("Qui répond", pill(mode.ok, mode.label), "chat"),
+    h("p", { class: "muted", text: ctx.cc.found
+      ? "Le chat lance ton propre Claude Code en arrière-plan : pas de clé API, ton abonnement, et Tako ne touche jamais à tes identifiants. Il lit le projet de ta session en cours, et tape / pour ses commandes."
+      : "Claude Code n'est pas installé : le chat utilise une clé API Anthropic, rangée dans le Gestionnaire d'identification Windows." }),
+    h("div", { class: "chips" },
+      chip("file", "Lit tes fichiers"), chip("search", "Cherche sur le web"), chip("slash", "Commandes /"), chip("shieldCheck", "Ne modifie rien"),
+    ),
+  );
+
+  const vision = card(
+    cardHead("Vision de l'écran", pill(ctx.settings.chatScreen, ctx.settings.chatScreen ? "Activée" : "Désactivée"), "monitor"),
+    row("Laisser Claude regarder ton écran", "Quand ta question parle de ce que tu vois — une erreur, une page, un design — il prend une capture tout seul et la regarde.",
+      toggle(ctx.settings.chatScreen, (v) => { ctx.settings.chatScreen = v; void save(v ? "Vision activée" : "Vision désactivée"); }, !ctx.cc.found), "eye"),
+    h("p", { class: "muted small", text: "La capture part directement à Claude pour ce message, sans être enregistrée sur le disque. Elle n'est prise que pendant une question au chat, jamais en arrière-plan." }),
+  );
+
+  const agentBody = h("div", { class: "agent-body" });
+  const drawAgent = () => {
+    clear(agentBody);
+    if (!ctx.settings.chatAgent) return;
+    const autoNote = h("div", { class: "notice warn small", text: "Mode auto : l'agent ouvre, clique et tape sans te demander. Une page piégée peut alors lui faire faire une action que tu n'as pas vue. Garde-le pour les sites de confiance." });
+    autoNote.style.display = ctx.settings.agentAuto ? "" : "none";
+    agentBody.append(
+      row("Navigateur visible", "Regarde l'agent cliquer en direct. Le navigateur reste ouvert entre les messages, en plein écran.",
+        toggle(ctx.settings.agentBrowserVisible, (v) => { ctx.settings.agentBrowserVisible = v; void save(); }), "eye"),
+      row("Mode auto", "L'agent agit sans te demander à chaque action. Plus rapide, moins sûr.",
+        toggle(ctx.settings.agentAuto, (v) => { ctx.settings.agentAuto = v; autoNote.style.display = v ? "" : "none"; drawGuard(); void save(v ? "Mode auto activé" : "Mode auto désactivé"); }), "bolt"),
+      autoNote,
+      guardHost,
+    );
+    drawGuard();
+  };
+  const guardHost = h("div", {});
+  const drawGuard = () => {
+    clear(guardHost);
+    if (ctx.settings.agentAuto) return;
+    guardHost.append(
+      h("div", { class: "guard" },
+        h("div", { class: "guard-title" }, proIcon("shield", 15), h("span", { text: "Ce que l'agent te demande avant de le faire" })),
+        h("div", { class: "chips" },
+          chip("globe", "Ouvrir une page", "warn"), chip("bolt", "Cliquer", "warn"), chip("terminal", "Taper du texte", "warn"),
+          chip("listChecks", "Remplir un formulaire", "warn"), chip("code", "Exécuter du JavaScript", "warn"), chip("file", "Envoyer un fichier", "warn"),
+        ),
+        h("p", { class: "muted small", text: "Chaque action arrive dans l'îlot avec l'URL ou le texte exact. Sans réponse, elle est refusée. Lire la page et faire des captures ne demande rien. Le contenu des sites est traité comme une donnée, jamais comme un ordre." }),
+      ),
+    );
+  };
+  const agent = card(
+    cardHead("Agent navigateur", h("span", { class: "tag", text: "Playwright" }), "globe"),
+    row("Donner un navigateur au chat", "Le chat devient un agent : il ouvre des sites, clique, remplit des formulaires pour toi.",
+      toggle(ctx.settings.chatAgent, (v) => { ctx.settings.chatAgent = v; drawAgent(); void save(v ? "Agent activé" : "Agent désactivé"); }, !ctx.cc.found), "sparkles"),
+    agentBody,
+  );
+  drawAgent();
+
+  const field = h("input", { type: "password", placeholder: ctx.hasKey ? "••••••••••••  (enregistrée)" : "sk-ant-…", autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+  const dropKey = button("Retirer", "danger", async () => {
+    try {
+      await Bridge.secretClear("anthropic-api-key");
+      ctx.hasKey = false;
+      field.placeholder = "sk-ant-…";
+      dropKey.style.display = "none";
+      toast("Clé retirée");
+      renderFoot();
+    } catch (err) {
+      toast(`Impossible : ${String(err)}`, "err");
+    }
+  });
+  dropKey.style.display = ctx.hasKey ? "" : "none";
+  const saveKey = button("Enregistrer", "", async () => {
+    const value = field.value.trim();
+    if (!value) return;
+    try {
+      await Bridge.secretSet("anthropic-api-key", value);
+      ctx.hasKey = true;
+      field.value = "";
+      field.placeholder = "••••••••••••  (enregistrée)";
+      dropKey.style.display = "";
+      toast("Clé enregistrée");
+      renderFoot();
+    } catch (err) {
+      toast(`Impossible : ${String(err)}`, "err");
+    }
+  });
+  const model = h("select", {}) as HTMLSelectElement;
+  for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
+  if (!MODELS.some(([id]) => id === ctx.settings.model)) model.append(h("option", { value: ctx.settings.model, text: ctx.settings.model }));
+  model.value = ctx.settings.model;
+  model.addEventListener("change", () => { ctx.settings.model = model.value; void save(); });
+
+  const api = card(
+    cardHead("Clé API (secours)", pill(ctx.hasKey, ctx.hasKey ? "Enregistrée" : "Aucune"), "key"),
+    h("p", { class: "muted", text: ctx.cc.found ? "Utilisée seulement si Claude Code n'est plus trouvé." : "Facturée à l'usage sur console.anthropic.com." }),
+    h("div", { class: "inline" }, field, saveKey, dropKey),
+    row("Modèle", "Pour le chat par clé API. Avec Claude Code, c'est ton modèle par défaut qui répond.", model, "cpu"),
+  );
+
+  return [pageHeader("Chat & agent", "Parle à Claude depuis l'îlot, et laisse-le agir pour toi."), backend, vision, agent, api];
+}
+
+function chip(iconName: ProIconName, text: string, kind: "" | "warn" = ""): HTMLElement {
+  return h("span", { class: `chip ${kind}` }, proIcon(iconName, 13), h("span", { text }));
+}
+
+function integrationsPage(): Node[] {
+  const counter = h("span", { class: "tag" });
+  const updateCounter = () => (counter.textContent = `${activeCount()} / ${MAX_ACTIVE} actives`);
+  updateCounter();
+  const grid = h("div", { class: "int-grid" });
+
+  for (const def of INTEGRATIONS) {
+    const configured = def.fields.every((f) => ctx.present[f.key]);
+    const active = ctx.settings.activeIntegrations.includes(def.id);
+    let status = pill(configured, configured ? "Connecté" : "Pas de clé");
+    const statusHost = h("div", { class: "int-status" }, status);
+    const sw = toggle(active, (on) => {
+      const list = ctx.settings.activeIntegrations;
+      if (on && list.length >= MAX_ACTIVE) {
+        sw.classList.remove("on");
+        toast(`${MAX_ACTIVE} pastilles maximum`, "err");
+        return;
+      }
+      ctx.settings.activeIntegrations = on ? [...list, def.id] : list.filter((x) => x !== def.id);
+      updateCounter();
+      void save(on ? `${def.name} affiché` : `${def.name} masqué`);
+    });
+    const fields = h("div", { class: "int-fields" });
+    for (const f of def.fields) {
+      const input = h("input", { type: f.secret ? "password" : "text", placeholder: ctx.present[f.key] ? "••••••••  (enregistré)" : f.placeholder, autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+      const ok = button("OK", "", async () => {
+        const value = input.value.trim();
+        try {
+          await Bridge.secretSet(f.key, value);
+          ctx.present[f.key] = value.length > 0;
+          input.value = "";
+          input.placeholder = value ? "••••••••  (enregistré)" : f.placeholder;
+          const all = def.fields.every((x) => ctx.present[x.key]);
+          const next = pill(all, all ? "Connecté" : "Pas de clé");
+          status.replaceWith(next);
+          status = next;
+          toast(value ? `${def.name} : clé enregistrée` : `${def.name} : clé retirée`);
+        } catch (err) {
+          toast(`Impossible : ${String(err)}`, "err");
+        }
+      });
+      ok.classList.add("small");
+      fields.append(h("label", { class: "int-label", text: f.label }), h("div", { class: "inline" }, input, ok));
+    }
+    const el = h(
+      "div",
+      { class: "int-card" },
+      h("div", { class: "int-head" },
+        h("div", { class: "int-logo" }, brandLogo(def.id, 19) ?? h("span", { text: def.name[0] })),
+        h("div", { class: "int-name" }, h("div", { class: "row-title", text: def.name }), h("div", { class: "row-desc", text: def.blurb })),
+        sw,
+      ),
+      statusHost,
+      fields,
+    );
+    el.style.setProperty("--c", def.color);
+    grid.append(el);
+  }
+
+  return [
+    pageHeader("Intégrations", "Des pastilles de couleur à côté du personnage, pour garder un œil sur tes services."),
+    h("div", { class: "lead" }, h("span", { class: "lead-icon" }, proIcon("shieldCheck", 15)), h("p", { class: "muted", text: "Les clés vont dans le Gestionnaire d'identification Windows, jamais sur le disque. L'îlot peut seulement demander si une clé existe." }), counter),
+    grid,
+  ];
+}
+
+function islandPage(): Node[] {
+  const vol = h("input", { type: "range", min: "0", max: "0.2", step: "0.005", value: String(ctx.settings.soundVolume) }) as HTMLInputElement;
+  const volLabel = h("span", { class: "range-value" });
+  const setVolLabel = () => {
+    volLabel.textContent = `${Math.round((Number(vol.value) / 0.2) * 100)} %`;
+    vol.style.setProperty("--p", `${(Number(vol.value) / 0.2) * 100}%`);
+  };
+  setVolLabel();
+  vol.addEventListener("input", () => { setVolLabel(); Sound.setVolume(Number(vol.value)); });
+  vol.addEventListener("change", () => { ctx.settings.soundVolume = Number(vol.value); void save(); Sound.play("blip"); });
+
+  const samples = ["approve", "finish", "love", "approval", "peek"];
+  let sample = 0;
+  const test = button("Tester", "", () => {
+    Sound.resume();
+    Sound.setEnabled(true);
+    Sound.setVolume(ctx.settings.soundVolume);
+    Sound.play(samples[sample++ % samples.length]);
+  }, "play");
+  test.classList.add("small");
+
+  const auto = h("input", { type: "range", min: "5", max: "60", step: "1", value: String(Math.round(ctx.settings.autoCloseInterval)) }) as HTMLInputElement;
+  const autoLabel = h("span", { class: "range-value" });
+  const setAutoLabel = () => {
+    autoLabel.textContent = `${auto.value} s`;
+    auto.style.setProperty("--p", `${((Number(auto.value) - 5) / 55) * 100}%`);
+  };
+  setAutoLabel();
+  auto.addEventListener("input", setAutoLabel);
+  auto.addEventListener("change", () => { ctx.settings.autoCloseInterval = Number(auto.value); void save(); });
+
+  const screen = h("select", {}) as HTMLSelectElement;
+  screen.append(h("option", { value: "primary", text: "Écran principal" }), h("option", { value: "cursor", text: "Écran sous la souris" }));
+  screen.value = ctx.settings.screen;
+  screen.addEventListener("change", () => { ctx.settings.screen = screen.value as Settings["screen"]; void save(); });
+
+  return [
+    pageHeader("Îlot & sons", "Comment Tako se montre, et comment il sonne."),
+    card(
+      cardHead("Sons", undefined, "volume"),
+      row("Sons activés", "Un petit son à chaque étape importante : permission, fin, erreur.",
+        toggle(ctx.settings.soundEnabled, (v) => { ctx.settings.soundEnabled = v; Sound.setEnabled(v); void save(); })),
+      row("Volume", null, h("div", { class: "range" }, vol, volLabel, test)),
+    ),
+    card(
+      cardHead("Îlot", undefined, "layers"),
+      row("Fermeture automatique", "Après combien de temps l'îlot se replie quand ta souris s'en va.", h("div", { class: "range" }, auto, autoLabel), "clock"),
+      row("Afficher sur", null, screen, "monitor"),
+      row("Lancer au démarrage de Windows", null, toggle(ctx.settings.autostart, (v) => { ctx.settings.autostart = v; void save(); }), "bolt"),
+    ),
+  ];
+}
+
+function updatesCard(): HTMLElement {
+  const body = h("div", { class: "stack" });
+  const status = h("p", { class: "muted" });
+  const bar = h("div", { class: "progress" }, h("i"));
+  bar.style.display = "none";
+  const actions = h("div", { class: "actions" });
+  const draw = () => {
+    clear(actions);
+    if (pendingUpdate) {
+      status.textContent = `La version ${pendingUpdate.version} est disponible (tu as la ${pendingUpdate.current}).${pendingUpdate.notes ? " " + pendingUpdate.notes : ""}`;
+      actions.append(button(`Installer la ${pendingUpdate.version}`, "primary", () => void install(), "bolt"));
+    } else {
+      status.textContent = `Tako ${ctx.version}. Les nouvelles versions publiées sur GitHub s'installent d'un clic, et Tako vérifie tout seul toutes les 6 heures.`;
+    }
+    actions.append(button("Vérifier maintenant", "ghost", () => void check(), "clock"));
+  };
+  const check = async () => {
+    status.textContent = "Vérification…";
+    try {
+      pendingUpdate = (await Bridge.updateCheck()) ?? null;
+      if (!pendingUpdate) toast("Tako est à jour");
+    } catch (err) {
+      status.textContent = `Impossible de vérifier : ${String(err).replace(/^Error:\s*/, "")}`;
+      return;
+    }
+    draw();
+    renderNav();
+  };
+  const install = async () => {
+    bar.style.display = "";
+    status.textContent = "Téléchargement de la mise à jour…";
+    clear(actions);
+    try {
+      await Bridge.updateInstall();
+    } catch (err) {
+      bar.style.display = "none";
+      status.textContent = `La mise à jour a échoué : ${String(err).replace(/^Error:\s*/, "")}`;
+      draw();
+    }
+  };
+  void onEvent<{ done: number; total: number | null }>("update-progress", ({ done, total }) => {
+    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    (bar.firstChild as HTMLElement).style.width = `${pct}%`;
+    status.textContent = total ? `Téléchargement… ${pct} %` : "Téléchargement…";
+  });
+  draw();
+  body.append(status, bar, actions);
+  return card(cardHead("Mises à jour", pendingUpdate ? pill("warn", `v${pendingUpdate.version} dispo`) : pill(true, "À jour"), "bolt"), body);
+}
+
+function aboutPage(): Node[] {
+  return [
+    pageHeader("À propos", `Tako ${ctx.version}`),
+    h("section", { class: "hero small" },
+      h("div", { class: "hero-glow" }),
+      h("div", { class: "hero-text" },
+        h("h2", { text: "Un petit compagnon pour tes agents." }),
+        h("p", { text: "Tako vit en haut de ton écran et te montre ce que fait Claude Code, en vrai : les fichiers, les diffs, les commandes, les permissions." }),
+        h("div", { class: "hero-actions" },
+          button("Ouvrir le repo", "primary", () => void Bridge.openUrl(REPO_URL), "external"),
+          button("Dossier Tako & log", "ghost", () => void Bridge.openTakoFolder(), "folder"),
+        ),
+      ),
+      h("div", { class: "hero-art" }, blob(96, { particles: true, interactive: true })),
+    ),
+    updatesCard(),
+    card(
+      cardHead("Vie privée", undefined, "shieldCheck"),
+      h("ul", { class: "list" },
+        h("li", { text: "Aucune télémétrie. Les seules requêtes réseau vont vers les services que tu configures." }),
+        h("li", { text: "Les clés restent dans le Gestionnaire d'identification Windows." }),
+        h("li", { text: "Le chat utilise ton Claude Code ; Tako ne lit jamais tes identifiants Claude." }),
+        h("li", { text: "L'écran n'est capturé que pendant une question au chat, et seulement si la vision est activée." }),
+        h("li", { text: "Le log reste sur ta machine : %LOCALAPPDATA%\\Tako\\tako.log." }),
+      ),
+    ),
+    card(
+      cardHead("Licence", undefined, "file"),
+      h("p", { class: "muted", text: "Code sous licence MIT. Le nom Tako, le personnage, l'icône et les sons sont réservés (LICENSE-ASSETS.md). Certaines parties du code dérivent de code MIT tiers, crédité dans THIRD_PARTY_NOTICES.md — les trois fichiers sont installés avec Tako." }),
+    ),
+  ];
+}
+
+async function main() {
+  void Sound.preload();
+  const boot = await Bridge.boot();
+  const hooks = (await Bridge.hooksStatus()) ?? { installed: false, settingsPath: "", hookPath: "", hookReady: false };
+  const cc = (await Bridge.claudeCodeInfo()) ?? { found: false, path: "", version: "" };
+  const hasKey = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
+  const present: Record<string, boolean> = {};
+  for (const def of INTEGRATIONS) {
+    for (const f of def.fields) present[f.key] = (await Bridge.secretPresent(f.key)) ?? false;
+  }
+  ctx = {
+    settings: { ...DEFAULT_SETTINGS, ...(boot?.settings ?? {}) },
+    version: boot?.version ?? "dev",
+    hooks,
+    cc,
+    hasKey,
+    present,
+  };
+  if (import.meta.env.DEV && location.search.includes("demo")) {
+    ctx.version = "0.1.1";
+    ctx.hooks = { installed: true, hookReady: true, settingsPath: String.raw`C:\Users\dev\.claude\settings.json`, hookPath: String.raw`C:\Users\dev\AppData\Local\Tako\bin\tako-hook.exe` };
+    ctx.cc = { found: true, path: String.raw`C:\Users\dev\.local\bin\claude.exe`, version: "2.1.286 (Claude Code)" };
+    ctx.settings.chatAgent = true;
+    ctx.settings.activeIntegrations = ["integration_github", "integration_vercel", "integration_stripe"];
+    for (const k of ["github-token", "vercel-token", "stripe-api-key"]) ctx.present[k] = true;
+  }
+  Sound.setEnabled(ctx.settings.soundEnabled);
+  Sound.setVolume(ctx.settings.soundVolume);
+
+  clear(root);
+  root.append(
+    h("div", { class: "app" },
+      h("aside", { class: "nav" },
+        h("div", { class: "brand" }, h("div", { class: "brand-logo" }, blob(20)), h("div", {}, h("div", { class: "brand-name", text: "Tako" }), h("div", { class: "brand-sub", text: "Réglages" }))),
+        navHost,
+        footHost,
+      ),
+      pageHost,
+    ),
+    toastEl,
+  );
+  renderNav();
+  renderFoot();
+  const wanted = location.hash.slice(1);
+  go(PAGES.some((p) => p.id === wanted) ? (wanted as PageId) : "home");
+
+  void onEvent<Settings>("settings-changed", (s) => {
+    ctx.settings = { ...ctx.settings, ...s };
+  });
+  void onEvent<{ version: string; current: string; notes: string }>("update-available", (info) => {
+    pendingUpdate = info;
+    renderNav();
+    toast(`Tako ${info.version} est disponible`);
+    if (current === "about") go("about");
+  });
+}
+
+void main();

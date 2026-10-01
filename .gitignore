@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+release/
+*.tsbuildinfo
+
+src-tauri/gen/schemas/
+
+.env
+.env.*
+!.env.example
+.playwright-mcp/

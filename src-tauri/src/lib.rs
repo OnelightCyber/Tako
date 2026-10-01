@@ -1,0 +1,555 @@
+mod claude;
+mod browser;
+mod claude_cli;
+mod files;
+mod hooks;
+mod integrations;
+mod island;
+mod log;
+mod pipe;
+mod secrets;
+mod settings;
+mod tray;
+mod updater;
+mod win_user;
+
+use std::os::windows::process::CommandExt;
+use std::process::Command;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
+
+use claude::{Chat, ChatContext, ChatReply};
+use files::DroppedFile;
+use hooks::{HookPreview, HookStatus};
+use island::{PollGate, ScreenInfo};
+use pipe::Pending;
+use settings::Settings;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub struct Shared {
+    pub settings: Mutex<Settings>,
+    pub gate: Arc<PollGate>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootInfo {
+    settings: Settings,
+    screen: ScreenInfo,
+    version: String,
+    hook_path: String,
+}
+
+#[tauri::command]
+fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
+    let mut settings = shared.settings.lock().unwrap().clone();
+
+    settings.hooks_installed = hooks::status().installed;
+    let screen = island::screen_info(&app, &settings.screen);
+    BootInfo {
+        settings,
+        screen,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        hook_path: settings::hook_exe_path().to_string_lossy().to_string(),
+    }
+}
+
+#[tauri::command]
+fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
+    let (screen_changed, autostart_changed) = {
+        let mut current = shared.settings.lock().unwrap();
+        let screen_changed = current.screen != settings.screen;
+        let autostart_changed = current.autostart != settings.autostart;
+        *current = settings.clone();
+        (screen_changed, autostart_changed)
+    };
+    if let Err(err) = settings::save(&settings) {
+        eprintln!("[tako] could not save settings: {err}");
+    }
+    if autostart_changed {
+        let manager = app.autolaunch();
+        let result = if settings.autostart { manager.enable() } else { manager.disable() };
+        if let Err(err) = result {
+            eprintln!("[tako] autostart: {err}");
+        }
+    }
+    if screen_changed {
+        let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+        island::apply_geometry(&app, &settings.screen, collapsed);
+    }
+    warm_browser(&app, &settings);
+
+    let _ = app.emit("settings-changed", settings);
+}
+
+fn warm_browser(app: &AppHandle, settings: &Settings) {
+    let app = app.clone();
+    let (agent, visible) = (settings.chat_agent, settings.agent_browser_visible);
+    tauri::async_runtime::spawn(async move {
+        let browser = app.state::<browser::Browser>();
+        if agent {
+            if let Err(err) = browser.ensure(visible).await {
+                log::line(format!("browser: {err}"));
+            }
+        } else {
+            browser.stop();
+        }
+    });
+}
+
+#[tauri::command]
+fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
+    island::apply_geometry(&app, &pref, collapsed);
+
+    island::set_ignore_cursor(&app, false);
+    shared.gate.forget_ignore_state();
+    shared.gate.set_active(!collapsed);
+}
+
+#[tauri::command]
+fn set_island_rect(shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
+    shared.gate.set_rect(island::IslandRect { x, y, w: width, h: height });
+}
+
+#[tauri::command]
+fn focus_window(app: AppHandle, focused: bool) {
+    let Some(win) = island::window(&app) else { return };
+    island::set_activating(&win, focused);
+    if focused {
+        let _ = win.set_focus();
+    }
+}
+
+#[tauri::command]
+fn reposition(app: AppHandle, shared: State<Shared>) {
+    let pref = shared.settings.lock().unwrap().screen.clone();
+    let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
+    island::apply_geometry(&app, &pref, collapsed);
+}
+
+#[tauri::command]
+fn open_url(url: String) {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let _ = Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+}
+
+#[tauri::command]
+fn open_in_vscode(path: Option<String>) -> bool {
+    if let Some(code) = find_on_path("code") {
+        let mut cmd = Command::new(code);
+        if let Some(p) = path.as_deref().filter(|p| !p.is_empty()) {
+            cmd.arg(p);
+        }
+        if cmd.creation_flags(CREATE_NO_WINDOW).spawn().is_ok() {
+            return true;
+        }
+    }
+    if let Some(p) = path.as_deref().filter(|p| !p.is_empty()) {
+        let _ = Command::new("explorer").arg(p).spawn();
+    }
+    false
+}
+
+fn find_on_path(stem: &str) -> Option<std::path::PathBuf> {
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let dirs = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&dirs) {
+        for ext in exts.split(';').filter(|e| !e.is_empty()) {
+            let candidate = dir.join(format!("{stem}{}", ext.to_lowercase()));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn set_paused(paused: bool) {
+    integrations::set_paused(paused);
+}
+
+#[tauri::command]
+fn hooks_status() -> HookStatus {
+    hooks::status()
+}
+
+#[tauri::command]
+fn hooks_preview(install: bool) -> Result<HookPreview, String> {
+    hooks::preview(install)
+}
+
+#[tauri::command]
+fn hooks_apply(
+    app: AppHandle,
+    shared: State<Shared>,
+    install: bool,
+    fingerprint: String,
+) -> Result<String, String> {
+    let backup = hooks::write(install, &fingerprint)?;
+    let updated = {
+        let mut current = shared.settings.lock().unwrap();
+        current.hooks_installed = install;
+        let _ = settings::save(&current);
+        current.clone()
+    };
+    let _ = app.emit("settings-changed", updated);
+    Ok(backup)
+}
+
+#[tauri::command]
+fn approval_decision(app: AppHandle, request_id: String, decision: String) {
+    pipe::answer(&app, &request_id, &decision);
+}
+
+#[tauri::command]
+fn approval_ack(app: AppHandle, request_id: String) {
+    pipe::acknowledge(&app, &request_id);
+}
+
+#[tauri::command]
+fn approval_decline(app: AppHandle, request_id: String) {
+    pipe::decline(&app, &request_id);
+}
+
+#[tauri::command]
+async fn chat_send(
+    app: AppHandle,
+    shared: State<'_, Shared>,
+    browser: State<'_, browser::Browser>,
+    chat: State<'_, Chat>,
+    cli_chat: State<'_, claude_cli::CliChat>,
+    query: String,
+    context: Option<ChatContext>,
+    cwd: Option<String>,
+) -> Result<ChatReply, String> {
+    if let Some(exe) = claude_cli::find() {
+        let (screen, agent, visible, auto) = {
+            let s = shared.settings.lock().unwrap();
+            (s.chat_screen, s.chat_agent, s.agent_browser_visible, s.agent_auto)
+        };
+        let browser = if agent {
+            if !browser.is_ready(visible).await {
+                let _ = app.emit_to(island::WINDOW_LABEL, "chat-status", "Starting the browser…");
+            }
+            Some(claude_cli::BrowserLink { url: browser.ensure(visible).await?, auto })
+        } else {
+            browser.stop();
+            None
+        };
+        let powers = claude_cli::Powers { hook: settings::hook_exe_path(), screen, browser };
+        return claude_cli::send(&app, &cli_chat, &exe, query, context, cwd, powers).await;
+    }
+    let model = shared.settings.lock().unwrap().model.clone();
+    claude::send(&chat, &model, query, context).await
+}
+
+#[tauri::command]
+fn chat_reset(chat: State<Chat>, cli_chat: State<claude_cli::CliChat>) {
+    chat.reset();
+    cli_chat.reset();
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeCodeInfo {
+    found: bool,
+    path: String,
+    version: String,
+}
+
+#[tauri::command]
+async fn claude_code_info() -> ClaudeCodeInfo {
+    let Some(exe) = claude_cli::find() else {
+        return ClaudeCodeInfo { found: false, path: String::new(), version: String::new() };
+    };
+    let version = tokio::process::Command::new(&exe)
+        .arg("--version")
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .await
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    ClaudeCodeInfo { found: true, path: exe.to_string_lossy().to_string(), version }
+}
+
+#[tauri::command]
+fn open_tako_folder() {
+    let dir = settings::local_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = Command::new("explorer.exe").arg(&dir).spawn();
+}
+
+#[tauri::command]
+fn show_island(app: AppHandle) {
+    let _ = app.emit_to(island::WINDOW_LABEL, "tray", "open".to_string());
+}
+
+#[tauri::command]
+async fn chat_commands(cli_chat: State<'_, claude_cli::CliChat>) -> Result<serde_json::Value, String> {
+    match claude_cli::find() {
+        Some(exe) => Ok(claude_cli::commands(&cli_chat, &exe).await),
+        None => Ok(serde_json::json!({ "commands": [], "skills": [] })),
+    }
+}
+
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Option<updater::UpdateInfo>, String> {
+    updater::check(&app).await
+}
+
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
+}
+
+#[tauri::command]
+fn chat_backend() -> &'static str {
+    if claude_cli::find().is_some() { "claude-code" } else { "api" }
+}
+
+#[tauri::command]
+fn ingest_file(path: String) -> Result<DroppedFile, String> {
+    files::ingest(&path)
+}
+
+#[tauri::command]
+fn ingest_bytes(request: tauri::ipc::Request<'_>) -> Result<DroppedFile, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("No file data.".into());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .unwrap_or_else(|| "file".into());
+    let saved = files::ingest_bytes(&name, bytes)?;
+    log::line(format!("drop saved {} ({} bytes)", saved.name, saved.size));
+    Ok(saved)
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+#[tauri::command]
+fn secret_present(key: String) -> bool {
+    secrets::present(&key)
+}
+
+#[tauri::command]
+fn secret_set(key: String, value: String) -> Result<(), String> {
+    secrets::set(&key, &value)
+}
+
+#[tauri::command]
+fn secret_clear(key: String) -> Result<(), String> {
+    secrets::clear(&key)
+}
+
+#[tauri::command]
+fn open_n8n() {
+    if let Some(url) = secrets::get("n8n-url") {
+        open_url(url);
+    }
+}
+
+#[tauri::command]
+async fn refresh_integration(app: AppHandle, id: String) {
+    integrations::poll_once(app, &id).await;
+}
+
+#[tauri::command]
+fn log_line(message: String) {
+    log::line(format!("ui  {message}"));
+}
+
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+
+fn settings_page_url(app: &AppHandle) -> WebviewUrl {
+    #[cfg(dev)]
+    if let Some(mut base) = app.config().build.dev_url.clone() {
+        base.set_path("/settings.html");
+        return WebviewUrl::External(base);
+    }
+    let _ = app;
+    WebviewUrl::App("settings.html".into())
+}
+
+fn create_settings_window(app: &AppHandle) {
+    let url = settings_page_url(app);
+    match WebviewWindowBuilder::new(app, "settings", url)
+        .additional_browser_args(BROWSER_ARGS)
+        .title("Settings — Tako")
+        .inner_size(940.0, 660.0)
+        .min_inner_size(780.0, 540.0)
+        .resizable(true)
+        .visible(false)
+        .center()
+        .build()
+    {
+        Ok(win) => {
+            let hidden = win.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = hidden.hide();
+                }
+            });
+        }
+        Err(err) => log::line(format!("settings window failed: {err}")),
+    }
+}
+
+pub fn show_settings_window(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("settings") else {
+        log::line("settings window missing");
+        return;
+    };
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+#[tauri::command]
+fn open_settings_window(app: AppHandle) {
+    show_settings_window(&app);
+}
+
+pub fn run() {
+    let loaded = settings::load();
+    let gate = Arc::new(PollGate::new());
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            let _ = app.emit_to(island::WINDOW_LABEL, "tray", "open".to_string());
+        }))
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Shared {
+            settings: Mutex::new(loaded.clone()),
+            gate: gate.clone(),
+        })
+        .manage(Pending::default())
+        .manage(Chat::default())
+        .manage(claude_cli::CliChat::default())
+        .manage(browser::Browser::default())
+        .invoke_handler(tauri::generate_handler![
+            boot,
+            save_settings,
+            set_collapsed,
+            set_island_rect,
+            focus_window,
+            reposition,
+            open_url,
+            open_in_vscode,
+            quit_app,
+            hooks_status,
+            hooks_preview,
+            hooks_apply,
+            approval_decision,
+            approval_ack,
+            approval_decline,
+            log_line,
+            chat_send,
+            chat_reset,
+            chat_backend,
+            update_check,
+            update_install,
+            chat_commands,
+            claude_code_info,
+            open_tako_folder,
+            show_island,
+            ingest_file,
+            ingest_bytes,
+            secret_present,
+            secret_set,
+            secret_clear,
+            refresh_integration,
+            open_n8n,
+            open_settings_window,
+            set_paused,
+        ])
+        .setup(move |app| {
+            let handle = app.handle().clone();
+            tray::build(&handle)?;
+
+            create_settings_window(&handle);
+
+            if let Some(win) = island::window(&handle) {
+                island::make_non_activating(&win);
+                island::apply_geometry(&handle, &loaded.screen, false);
+                let _ = win.show();
+
+                win.on_window_event(|event| {
+                    if let tauri::WindowEvent::DragDrop(drag) = event {
+                        match drag {
+                            tauri::DragDropEvent::Enter { paths, .. } => {
+                                log::line(format!("drag enter (window) {} file(s)", paths.len()))
+                            }
+                            tauri::DragDropEvent::Drop { paths, .. } => {
+                                log::line(format!("drag drop (window) {} file(s)", paths.len()))
+                            }
+                            tauri::DragDropEvent::Leave => log::line("drag leave (window)".to_string()),
+                            _ => {}
+                        }
+                    }
+                });
+            }
+            gate.collapsed.store(false, Ordering::Relaxed);
+            gate.set_active(true);
+            island::spawn_cursor_poll(handle.clone(), gate.clone());
+            island::spawn_drag_watch(handle.clone(), gate.clone());
+
+
+            log::line(format!("--- Tako {} started ---", env!("CARGO_PKG_VERSION")));
+            hooks::ensure_hook_exe(&handle);
+            pipe::start(handle.clone());
+            if loaded.chat_agent {
+                warm_browser(&handle, &loaded);
+            }
+            integrations::start(handle.clone());
+            updater::start(handle.clone());
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while running Tako")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<browser::Browser>().stop();
+            }
+        });
+}
