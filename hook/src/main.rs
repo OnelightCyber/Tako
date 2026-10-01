@@ -40,7 +40,8 @@ fn wait_for(event: &str, origin: &str, tool: &str, review: bool) -> Wait {
         return Wait::Permission;
     }
     let browser_tool = tool.strip_prefix("mcp__playwright__").unwrap_or("");
-    if event == "PreToolUse" && origin == "chat" && GATED_AGENT_TOOLS.contains(&browser_tool) {
+    let app_tool = tool == "mcp__tako__open_app";
+    if event == "PreToolUse" && origin == "chat" && (GATED_AGENT_TOOLS.contains(&browser_tool) || app_tool) {
         return Wait::AgentAction;
     }
     if event == "PreToolUse" && origin != "chat" && review && snapshot::EDIT_TOOLS.contains(&tool) {
@@ -49,11 +50,16 @@ fn wait_for(event: &str, origin: &str, tool: &str, review: bool) -> Wait {
     Wait::None
 }
 
+fn hands_free(permission_mode: &str) -> bool {
+    matches!(permission_mode, "auto" | "acceptEdits" | "bypassPermissions" | "dontAsk")
+}
+
 enum Talk {
     Unreachable,
     Answer(Option<String>),
 }
 
+mod apps;
 mod mcp;
 mod review;
 mod screen;
@@ -195,7 +201,8 @@ fn read_event() -> Option<(String, Wait)> {
     let tool = map.get("tool_name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let data = snapshot::data_dir();
     let review_on = data.as_ref().map(|d| d.join("review-mode").exists()).unwrap_or(false);
-    let wait = wait_for(&event, &origin, &tool, review_on);
+    let mode = map.get("permission_mode").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let wait = wait_for(&event, &origin, &tool, review_on && !hands_free(&mode));
     if wait == Wait::AgentAction || wait == Wait::Review {
         map.insert("await_decision".into(), serde_json::Value::Bool(true));
     }
@@ -389,6 +396,9 @@ mod tests {
 
     #[test]
     fn only_the_chat_agents_acting_browser_tools_wait() {
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__open_app", false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__screenshot", false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "mcp__tako__open_app", false), Wait::None);
         assert_eq!(wait_for("PermissionRequest", "", "Bash", false), Wait::Permission);
         assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate", false), Wait::AgentAction);
         assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click", false), Wait::AgentAction);
@@ -405,6 +415,17 @@ mod tests {
         assert_eq!(wait_for("PreToolUse", "chat", "Edit", true), Wait::None);
         assert_eq!(wait_for("PreToolUse", "", "Bash", true), Wait::None);
         assert_eq!(wait_for("PostToolUse", "", "Edit", true), Wait::None);
+    }
+
+    #[test]
+    fn sessions_in_auto_mode_are_never_held_for_review() {
+        assert!(hands_free("auto"));
+        assert!(hands_free("acceptEdits"));
+        assert!(hands_free("bypassPermissions"));
+        assert!(hands_free("dontAsk"));
+        assert!(!hands_free("default"));
+        assert!(!hands_free("plan"));
+        assert!(!hands_free(""));
     }
 
     #[test]

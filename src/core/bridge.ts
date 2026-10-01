@@ -80,6 +80,11 @@ export const Bridge = {
   missionStart: (task: string, cwd: string) => callOrThrow<void>("mission_start", { task, cwd }),
   pickFolder: () => call<string | null>("pick_folder"),
   hotkeyStatus: () => call<string | null>("hotkey_status"),
+  gameStatus: () => call<GameState>("game_status"),
+  vpnStatus: () => call<VpnStatus>("vpn_status"),
+  vpnTest: () => call<void>("vpn_test"),
+  vpnOpenApp: () => call<boolean>("vpn_open_app"),
+  bluetoothTest: () => call<void>("bluetooth_test"),
   mediaControl: (action: "toggle" | "next" | "previous") => call<void>("media_control", { action }),
   usageDrag: () => call<void>("usage_drag"),
   usageClose: () => call<void>("usage_close"),
@@ -201,6 +206,34 @@ export interface SystemStats {
   ramUsedGb: number;
   ramTotalGb: number;
   gpu: number | null;
+}
+
+export interface GameState {
+  active: boolean;
+  app: string;
+}
+
+export interface VpnStatus {
+  present: boolean;
+  up: boolean;
+  name: string;
+  location: string;
+}
+
+export interface VpnEvent {
+  kind: "down" | "off" | "up";
+  name: string;
+  location: string;
+  test: boolean;
+}
+
+export interface BtEvent {
+  name: string;
+  kind: "headphones" | "speaker" | "phone" | "gamepad" | "peripheral" | "device";
+  connected: boolean;
+  battery: number | null;
+  address: string;
+  test: boolean;
 }
 
 export interface HookStatus {

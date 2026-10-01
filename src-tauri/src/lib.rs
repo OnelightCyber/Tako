@@ -1,7 +1,9 @@
 mod claude;
+mod bluetooth;
 mod browser;
 mod claude_cli;
 mod files;
+mod game;
 mod hooks;
 mod integrations;
 mod island;
@@ -15,6 +17,7 @@ mod sysstats;
 mod tray;
 mod updater;
 mod usage;
+mod vpn;
 mod widget;
 mod win_user;
 
@@ -98,7 +101,38 @@ fn apply_features(app: &AppHandle, settings: &Settings) {
     sessions::set_review_flag(settings.review_mode);
     media::set_enabled(settings.media_enabled);
     sysstats::set_enabled(settings.stats_enabled);
+    game::set_enabled(settings.game_mode);
+    bluetooth::set_enabled(settings.bt_animation);
+    vpn::set_enabled(settings.vpn_alerts);
     register_hotkey(app, &settings.mission_hotkey);
+}
+
+#[tauri::command]
+fn game_status() -> game::GameState {
+    game::state()
+}
+
+#[tauri::command]
+fn vpn_status() -> vpn::VpnStatus {
+    vpn::status()
+}
+
+#[tauri::command]
+fn vpn_test(app: AppHandle) {
+    vpn::test(&app);
+}
+
+#[tauri::command]
+fn vpn_open_app() -> bool {
+    match vpn::mullvad_app() {
+        Some(path) => Command::new(path).spawn().is_ok(),
+        None => false,
+    }
+}
+
+#[tauri::command]
+fn bluetooth_test(app: AppHandle) {
+    bluetooth::test(&app);
 }
 
 static HOTKEY_ERROR: Mutex<Option<String>> = Mutex::new(None);
@@ -132,15 +166,14 @@ fn hotkey_status() -> Option<String> {
 
 fn warm_browser(app: &AppHandle, settings: &Settings) {
     let app = app.clone();
-    let (agent, visible) = (settings.chat_agent, settings.agent_browser_visible);
+    let agent = settings.chat_agent;
     tauri::async_runtime::spawn(async move {
         let browser = app.state::<browser::Browser>();
         if agent {
-            if let Err(err) = browser.ensure(visible).await {
-                log::line(format!("browser: {err}"));
-            }
+            browser.warm().await;
         } else {
             browser.stop();
+            browser.close_chrome();
         }
     });
 }
@@ -151,7 +184,7 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
     island::apply_geometry(&app, &pref, collapsed);
 
-    island::set_ignore_cursor(&app, false);
+    island::set_ignore_cursor(&app, collapsed && game::active());
     shared.gate.forget_ignore_state();
     shared.gate.set_active(!collapsed);
 }
@@ -288,9 +321,9 @@ async fn chat_send(
     cwd: Option<String>,
 ) -> Result<ChatReply, String> {
     if let Some(exe) = claude_cli::find() {
-        let (screen, agent, visible, auto) = {
+        let (screen, agent, visible, auto, apps) = {
             let s = shared.settings.lock().unwrap();
-            (s.chat_screen, s.chat_agent, s.agent_browser_visible, s.agent_auto)
+            (s.chat_screen, s.chat_agent, s.agent_browser_visible, s.agent_auto, s.chat_apps)
         };
         let browser = if agent {
             if !browser.is_ready(visible).await {
@@ -301,7 +334,7 @@ async fn chat_send(
             browser.stop();
             None
         };
-        let powers = claude_cli::Powers { hook: settings::hook_exe_path(), screen, browser };
+        let powers = claude_cli::Powers { hook: settings::hook_exe_path(), screen, apps, browser };
         return claude_cli::send(&app, &cli_chat, &exe, query, context, cwd, powers).await;
     }
     let model = shared.settings.lock().unwrap().model.clone();
@@ -637,6 +670,11 @@ pub fn run() {
             mission_start,
             pick_folder,
             hotkey_status,
+            game_status,
+            vpn_status,
+            vpn_test,
+            vpn_open_app,
+            bluetooth_test,
             media_control,
             widget::usage_resize,
             widget::usage_drag,
@@ -700,6 +738,9 @@ pub fn run() {
             sessions::start_cleanup();
             media::start(handle.clone(), gate.clone());
             sysstats::start(handle.clone(), gate.clone());
+            game::start(handle.clone());
+            vpn::start(handle.clone());
+            bluetooth::start(handle.clone());
             apply_features(&handle, &loaded);
             Ok(())
         })

@@ -1,7 +1,7 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName, SizeHint } from "./layout";
 import type { EyeShape } from "../mascot/engine";
 import type { Activity } from "./activity";
-import type { ContextInfo, SystemStats, Track, TurnSummary, UsageAlert, UsageReport } from "./bridge";
+import type { BtEvent, ContextInfo, SystemStats, Track, TurnSummary, UsageAlert, UsageReport, VpnEvent } from "./bridge";
 import type { DiffLine } from "./activity";
 
 export type AgentSource = "claudeCode" | "n8n";
@@ -33,6 +33,7 @@ export interface AgentTask {
   finalMessage?: string | null;
   origin?: string | null;
   reviewAll?: boolean;
+  permissionMode?: string | null;
 }
 
 export interface ReviewPreview {
@@ -140,6 +141,15 @@ export interface Settings {
   recentProjects: string[];
   mediaEnabled: boolean;
   statsEnabled: boolean;
+  gameMode: boolean;
+  gameMute: boolean;
+  btAnimation: boolean;
+  vpnAlerts: boolean;
+  chatApps: boolean;
+  pomodoroFocus: number;
+  pomodoroBreak: number;
+  pomodoroLong: number;
+  pomodoroRounds: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -170,6 +180,15 @@ export const DEFAULT_SETTINGS: Settings = {
   recentProjects: [],
   mediaEnabled: true,
   statsEnabled: true,
+  gameMode: true,
+  gameMute: true,
+  btAnimation: true,
+  vpnAlerts: true,
+  chatApps: true,
+  pomodoroFocus: 25,
+  pomodoroBreak: 5,
+  pomodoroLong: 15,
+  pomodoroRounds: 4,
 };
 
 type Listener = () => void;
@@ -213,6 +232,12 @@ class AppState {
   stats: SystemStats | null = null;
   usage: UsageReport | null = null;
   usageAlert: UsageAlert | null = null;
+
+  gameMode = false;
+  gameApp = "";
+  missed: string[] = [];
+  vpnEvent: VpnEvent | null = null;
+  btEvent: BtEvent | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
 

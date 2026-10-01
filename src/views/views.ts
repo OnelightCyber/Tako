@@ -13,6 +13,8 @@ import {
   buildFinished, buildMission, buildMusic, buildReview, buildSystem, buildUsageAlert,
   contextBadge, mediaPill, statsPill,
 } from "./extra";
+import { buildBluetooth, buildTimer, buildVpn, timerPill } from "./live";
+import { Timer } from "../core/timer";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -85,6 +87,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
   const tabMission = h("button", { class: "tab", title: "Mission", onclick: () => go("mission") }, proIcon("rocket", 13, 2));
+  const tabTimer = h("button", { class: "tab", title: "Minuteur", onclick: () => go("timer") }, proIcon("timer", 13, 2));
 
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
@@ -97,7 +100,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabMission, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabChat, tabMission, tabTimer, tabDrop),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -109,6 +112,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       tabMission.classList.toggle("on", v === "mission");
+      tabTimer.classList.toggle("on", v === "timer");
+      tabTimer.classList.toggle("live", Timer.active);
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
@@ -143,6 +148,10 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
 
   let pillIds = "";
+  const timer = timerPill(actions);
+  Timer.onTick(() => {
+    if (State.view === "overview" && State.mode === "expanded" && Timer.state) timer.update();
+  });
   const media = mediaPill(actions);
   const stats = statsPill(actions);
   let detailOpen = false;
@@ -220,19 +229,22 @@ function buildOverview(actions: ViewActions): ViewHost {
 
       jump.style.display = detailOpen ? "none" : "";
 
+      const showTimer = !!Timer.state;
       const showMedia = State.settings.mediaEnabled && !!State.media?.active;
       const showStats = State.settings.statsEnabled && !!State.stats;
-      const room = 6 - (showMedia ? 1 : 0) - (showStats ? 1 : 0);
+      const room = 6 - (showTimer ? 1 : 0) - (showMedia ? 1 : 0) - (showStats ? 1 : 0);
       const others = State.otherTasks.slice(0, Math.min(4, room));
-      const pillKey = `${others.map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.name}`).join("|")}~${showMedia}~${showStats}`;
+      const pillKey = `${others.map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.name}`).join("|")}~${showTimer}~${showMedia}~${showStats}`;
       if (pillKey !== pillIds) {
         pillIds = pillKey;
         clear(pills);
         for (const t of others) pills.append(buildPill(t, actions));
+        if (showTimer) pills.append(timer.el);
         if (showMedia) pills.append(media.el);
         if (showStats) pills.append(stats.el);
         pruneMiniBots();
       }
+      if (showTimer) timer.update();
       if (showMedia) media.update();
       if (showStats) stats.update();
     },
@@ -309,7 +321,8 @@ function buildApproval(actions: ViewActions): ViewHost {
       clear(who);
       const req = State.pendingApproval;
       if (req?.origin === "chat") {
-        who.append(h("div", { class: "who-row" }, dot("#FF7A59", 8), h("span", { class: "n", text: "Tako agent" }), h("span", { text: "wants to use the browser" })));
+        const what = req.tool.endsWith("open_app") ? "veut ouvrir une application" : "veut utiliser le navigateur";
+        who.append(h("div", { class: "who-row" }, dot("#FF7A59", 8), h("span", { class: "n", text: "Tako agent" }), h("span", { text: what })));
       } else {
         const task = State.tasks.find((t) => t.id === req?.taskId) ?? State.focusTask;
         who.append(agentWho(task, "needs permission"));
@@ -489,6 +502,9 @@ export function buildViews(
   map.set("music", buildMusic());
   map.set("system", buildSystem());
   map.set("usage", buildUsageAlert(actions));
+  map.set("timer", buildTimer(actions));
+  map.set("bluetooth", buildBluetooth(actions));
+  map.set("vpn", buildVpn(actions));
 
   map.set("mail", buildPlaceholder("Sending by email isn't in this version.", ""));
   map.set("searching", buildPlaceholder("Claude is searching…", ""));

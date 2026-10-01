@@ -388,6 +388,7 @@ export function buildMission(actions: ViewActions): ViewHost {
   const setStatus = (text: string, kind: "" | "ok" | "err" = "") => {
     status.textContent = text;
     status.className = `ms-status ${kind}`;
+    State.notify();
   };
 
   async function launch() {
@@ -437,29 +438,31 @@ export function buildMission(actions: ViewActions): ViewHost {
       const list = projects();
       if (!selected || !list.some((p) => p === selected)) selected = list[0] ?? null;
       const k = `${list.join("|")}~${selected}`;
-      if (k === key) return;
-      key = k;
-      clear(chips);
-      for (const p of list) {
-        const chip = h("button", { class: `ms-chip${p === selected ? " on" : ""}`, title: p }, proIcon("folder", 11, 2.2), h("span", { text: baseName(p) }));
-        chip.addEventListener("click", () => {
-          selected = p;
-          key = "";
-          State.notify();
-        });
-        chips.append(chip);
-      }
-      const other = h("button", { class: "ms-chip ghost" }, h("span", { text: list.length ? "Autre dossier…" : "Choisir le dossier du projet…" }));
-      other.addEventListener("click", async () => {
-        const picked = await Bridge.pickFolder();
-        if (picked) {
-          custom = picked;
-          selected = picked;
-          key = "";
-          State.notify();
+      if (k !== key) {
+        key = k;
+        clear(chips);
+        for (const p of list) {
+          const chip = h("button", { class: `ms-chip${p === selected ? " on" : ""}`, title: p }, proIcon("folder", 11, 2.2), h("span", { text: baseName(p) }));
+          chip.addEventListener("click", () => {
+            selected = p;
+            key = "";
+            State.notify();
+          });
+          chips.append(chip);
         }
-      });
-      chips.append(other);
+        const other = h("button", { class: "ms-chip ghost" }, h("span", { text: list.length ? "Autre dossier…" : "Choisir le dossier du projet…" }));
+        other.addEventListener("click", async () => {
+          const picked = await Bridge.pickFolder();
+          if (picked) {
+            custom = picked;
+            selected = picked;
+            key = "";
+            State.notify();
+          }
+        });
+        chips.append(other);
+      }
+      if (State.view === "mission") fit("mission", el, body);
     },
     focus() {
       input.focus();

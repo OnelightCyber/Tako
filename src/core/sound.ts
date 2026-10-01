@@ -9,6 +9,7 @@ export type SoundName = (typeof SOUND_NAMES)[number];
 
 class SoundEngine {
   enabled = true;
+  muted = false;
   volume = 0.12;
 
   private ctx: AudioContext | null = null;
@@ -68,8 +69,8 @@ class SoundEngine {
     this.enabled = on;
   }
 
-  play(name: SoundName | string) {
-    if (!this.enabled) return;
+  play(name: SoundName | string, force = false) {
+    if (!this.enabled || (this.muted && !force)) return;
     const ctx = this.ctx;
     const master = this.master;
     const buf = this.buffers.get(name);

@@ -181,6 +181,9 @@ async fn fetch(exe: &Path) -> UsageReport {
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .creation_flags(CREATE_NO_WINDOW);
+    for key in crate::sessions::session_vars() {
+        cmd.env_remove(key);
+    }
     let failed = |e: String| UsageReport { fetched_at: now(), error: Some(e), ..Default::default() };
     let mut child = match cmd.spawn() {
         Ok(c) => c,

@@ -48,6 +48,40 @@ pub struct Settings {
     pub media_enabled: bool,
     #[serde(default = "default_true")]
     pub stats_enabled: bool,
+    #[serde(default = "default_true")]
+    pub game_mode: bool,
+    #[serde(default = "default_true")]
+    pub game_mute: bool,
+    #[serde(default = "default_true")]
+    pub bt_animation: bool,
+    #[serde(default = "default_true")]
+    pub vpn_alerts: bool,
+    #[serde(default = "default_true")]
+    pub chat_apps: bool,
+    #[serde(default = "default_focus")]
+    pub pomodoro_focus: u32,
+    #[serde(default = "default_break")]
+    pub pomodoro_break: u32,
+    #[serde(default = "default_long")]
+    pub pomodoro_long: u32,
+    #[serde(default = "default_rounds")]
+    pub pomodoro_rounds: u32,
+}
+
+fn default_focus() -> u32 {
+    25
+}
+
+fn default_break() -> u32 {
+    5
+}
+
+fn default_long() -> u32 {
+    15
+}
+
+fn default_rounds() -> u32 {
+    4
 }
 
 fn default_usage_position() -> String {
@@ -99,6 +133,15 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             media_enabled: true,
             stats_enabled: true,
+            game_mode: true,
+            game_mute: true,
+            bt_animation: true,
+            vpn_alerts: true,
+            chat_apps: true,
+            pomodoro_focus: default_focus(),
+            pomodoro_break: default_break(),
+            pomodoro_long: default_long(),
+            pomodoro_rounds: default_rounds(),
         }
     }
 }

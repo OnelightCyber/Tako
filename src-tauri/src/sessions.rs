@@ -22,6 +22,26 @@ const KEEP_FOR_MS: u128 = 3 * 24 * 3600 * 1000;
 const CONTEXT_EVERY: Duration = Duration::from_millis(1500);
 const MAX_TASK_CHARS: usize = 4000;
 const MAX_DIFF_CHARS: usize = 60_000;
+const INHERITED_SESSION_VARS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+];
+
+pub fn session_vars() -> Vec<std::ffi::OsString> {
+    std::env::vars_os()
+        .map(|(key, _)| key)
+        .filter(|key| INHERITED_SESSION_VARS.contains(&key.to_string_lossy().to_uppercase().as_str()))
+        .collect()
+}
 const MAX_STORE_BYTES: u64 = 1024 * 1024 * 1024;
 
 const SECRET_NAMES: &[&str] = &[
@@ -588,6 +608,9 @@ pub async fn commit_message(session: String, cwd: String) -> Result<String, Stri
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .creation_flags(CREATE_NO_WINDOW);
+    for key in session_vars() {
+        cmd.env_remove(key);
+    }
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
@@ -636,13 +659,12 @@ pub fn start_mission(task: &str, cwd: &str) -> Result<(), String> {
     }
     let exe = crate::claude_cli::find().ok_or("Claude Code isn't installed.")?;
     let task = if task.starts_with('-') { format!(" {task}") } else { task };
-    Command::new(exe)
-        .arg(task)
-        .current_dir(&dir)
-        .env("TAKO_ORIGIN", "mission")
-        .creation_flags(CREATE_NEW_CONSOLE)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(exe);
+    cmd.arg(task).current_dir(&dir).env("TAKO_ORIGIN", "mission").creation_flags(CREATE_NEW_CONSOLE);
+    for key in session_vars() {
+        cmd.env_remove(key);
+    }
+    cmd.spawn().map_err(|e| e.to_string())?;
     log::line(format!("mission started in {}", dir.display()));
     Ok(())
 }

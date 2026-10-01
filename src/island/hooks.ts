@@ -23,6 +23,7 @@ export interface HookPayload {
   error?: string;
 
   tako_origin?: string;
+  permission_mode?: string;
   user_prompt?: string;
   last_assistant_message?: string;
   tako_review?: ReviewPreview;
@@ -96,10 +97,10 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
   return tool;
 }
 
-const AGENT_FIELDS = ["url", "element", "text", "key", "function", "code", "action"] as const;
+const AGENT_FIELDS = ["url", "element", "text", "key", "function", "code", "action", "name"] as const;
 
 function agentTarget(tool: string, input: Record<string, unknown>): string {
-  const action = tool.replace(/^mcp__playwright__browser_/, "").replace(/_/g, " ");
+  const action = tool.replace(/^mcp__playwright__browser_|^mcp__tako__/, "").replace(/_/g, " ");
   const parts: string[] = [];
   for (const field of AGENT_FIELDS) {
     const value = input[field];
@@ -162,6 +163,7 @@ function sessionTask(payload: HookPayload): AgentTask {
   }
   if (cwd) task.sessionCwd = cwd;
   if (payload.tako_origin) task.origin = payload.tako_origin;
+  if (payload.permission_mode) task.permissionMode = payload.permission_mode;
   task.lastEventAt = Date.now();
   return task;
 }
@@ -270,6 +272,13 @@ function expire(island: Island, requestId: string) {
 }
 
 function request(island: Island, info: ApprovalInfo) {
+  if (State.gameMode) {
+    if (info.kind === "permission") void Bridge.approvalDecline(info.requestId);
+    else void Bridge.approvalDecision(info.requestId, "deny");
+    const label = info.kind === "permission" ? "une permission t'attend dans le terminal" : info.kind === "review" ? "une modif a été refusée (relecture)" : "une action du chat a été refusée";
+    if (!State.missed.includes(label)) State.missed.push(label);
+    return;
+  }
   if (info.requestId) void Bridge.approvalAck(info.requestId);
   if (!State.pendingApproval) {
     present(island, info);

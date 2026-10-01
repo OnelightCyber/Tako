@@ -91,7 +91,8 @@ tokens it used. Three buttons:
 
 Optional: every file edit waits for your OK in the island, with the real diff and line numbers — **Approve**,
 **Reject**, or approve the rest of the turn. No answer: the edit isn't applied. Tako closed: Claude Code works as
-usual.
+usual. A session in Claude Code's **auto mode** (or accept-edits / bypass) is never held: Tako reads the session's
+permission mode and shows it in the live view.
 
 ### Missions
 
@@ -112,12 +113,15 @@ file or URL. Nobody answers? Claude Code asks in the terminal, as if Tako weren'
   screenshot on its own and looks at it.
 - **`/` commands**: type `/` and Tako suggests Claude Code's commands and skills (`/code-review`, `/simplify`,
   `/usage`, `/context`…), with the keyboard or the mouse.
-- **Read-only**: it answers, it never changes anything. One button clears the conversation.
+- **Opens your apps**: "ouvre Spotify", "lance Discord" — the chat opens the installed app from the Start menu and
+  leaves it open. It never closes anything.
+- **Read-only** otherwise: it never changes your files. One button clears the conversation.
 
 ### Browser agent
 
 Turn the agent on and the chat drives a **real browser** (Playwright): it opens sites, reads pages, clicks, fills
-forms. The browser **stays open** between messages, with a profile of its own. By default every action that
+forms. Tako starts your own Chrome (or Edge) with a profile of its own and the chat connects to it, so the window
+**stays open** between messages and after every answer — only you close it. By default every action that
 does something — open a page, click, type, run JavaScript — is asked in the island with the exact URL or text;
 **auto mode** lets everything through.
 
@@ -137,6 +141,15 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
 - **Now playing**: Spotify, YouTube, Deezer… with the artwork, previous / play / next and a progress bar, and a mini
   equalizer in the compact island.
 - **Your PC**: processor, memory and graphics card live, in a pill.
+- **The island splits in two**: when two things are live at once — Claude working and a timer, a timer and music —
+  a small bubble detaches from the island like a drop, with a gooey animation. Click it to open what it shows.
+- **Timer & Pomodoro**: focus / break / long break cycles, the time in a ring around the character, an animated
+  alarm, and the island stays visible while it runs.
+- **Game mode**: a game or a video in full screen and nothing opens — the island and the widget hide, clicks go to
+  the game, sounds are muted. When you're back, one line tells you what you missed.
+- **Bluetooth**: headphones connect and the island shows them with their battery, like on an iPhone.
+- **VPN watch**: Mullvad, WireGuard, NordVPN, Proton… if the tunnel drops, a red alert tells you your real IP is
+  visible; when it's back, a green one with the location.
 
 ### And also
 
@@ -424,7 +437,6 @@ docs/                     banner, GIF and screenshots
 - [x] **Missions** from a global shortcut
 - [x] Limit alerts, forecast and history; music; PC stats
 - [ ] English settings window
-- [ ] **Game mode**: nothing opens over a full-screen game
 - [ ] **Server monitoring**: up / down, CPU, RAM, disk, containers
 - [ ] **Session guardrails**: block dangerous commands, flag access to secrets
 - [ ] Code-signed installer

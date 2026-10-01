@@ -17,6 +17,8 @@ import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../vie
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
 import { decideCurrent } from "./hooks";
+import { LiveLayer, busySession, type LiveKind } from "./bubble";
+import { Timer } from "../core/timer";
 
 const BOT_OVERHANG = 40;
 
@@ -43,6 +45,7 @@ export class Island {
   private greetingCanvas!: HTMLCanvasElement;
   private miniGrid!: HTMLElement;
   private mediaStrip!: HTMLElement;
+  private live!: LiveLayer;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -199,8 +202,62 @@ export class Island {
     this.greetingCanvas.style.width = `${EXPANDED_W}px`;
     this.greetingCanvas.style.height = "150px";
 
-    this.root.append(this.wakeStrip, this.islandEl);
+    this.live = new LiveLayer();
+    this.live.onOpen = (kind) => this.openLive(kind);
+    this.islandEl.insertBefore(this.live.ringEl, this.botCanvas);
+    this.islandEl.append(this.live.strip, this.live.bar);
+    this.root.append(this.live.defs, this.wakeStrip, this.live.goo, this.islandEl, this.live.bubble);
     this.applyGeometry();
+  }
+
+  private openLive(kind: LiveKind) {
+    Sound.play("blip");
+    if (kind === "timer") {
+      this.setView("timer");
+    } else if (kind === "music") {
+      this.setView("music");
+    } else {
+      const task = busySession();
+      if (task) State.setFocus(task.id);
+      this.setView(task?.state === "approval" && State.pendingApproval ? (State.pendingApproval.kind === "review" ? "review" : "approval") : "session");
+    }
+  }
+
+  setGameMode(active: boolean, app: string) {
+    if (State.gameMode === active && State.gameApp === app) return;
+    const was = State.gameMode;
+    State.gameMode = active;
+    State.gameApp = app;
+    Sound.muted = active && State.settings.gameMute;
+    this.fsm.setSuppressed(active);
+    if (active) {
+      State.isPinned = false;
+      this.fsm.pinned = false;
+    } else if (was && State.missed.length) {
+      const during = app || "ta partie";
+      State.noteMessage = `Pendant ${during} : ${State.missed.join(" · ")}`;
+      State.missed = [];
+      Sound.play("peek");
+      this.alert("note");
+    }
+    State.notify();
+  }
+
+  private noteMissed(view: IslandViewName) {
+    const task = State.focusTask;
+    const at = new Date();
+    const clock = `${at.getHours()} h ${String(at.getMinutes()).padStart(2, "0")}`;
+    let label: string | null = null;
+    switch (view) {
+      case "finished": label = task?.sessionId ? `${task.name} a fini` : null; break;
+      case "error": label = task?.sessionId ? `${task.name} s'est arrêté sur une erreur` : null; break;
+      case "usage": label = State.usageAlert ? `limite Claude à ${State.usageAlert.percent} %` : null; break;
+      case "vpn": label = State.vpnEvent ? (State.vpnEvent.kind === "up" ? `VPN reconnecté à ${clock}` : `VPN coupé à ${clock}`) : null; break;
+      case "timer": label = "minuteur terminé"; break;
+      case "note": label = State.noteMessage; break;
+      default: label = null;
+    }
+    if (label && !State.missed.includes(label)) State.missed.push(label);
   }
 
   private wireFsm() {
@@ -296,12 +353,17 @@ export class Island {
   }
 
   alert(view: IslandViewName) {
+    if (State.gameMode) {
+      this.noteMissed(view);
+      return;
+    }
     this.fsm.pinned = State.isPinned;
     this.fsm.forceHome();
     this.expand(view);
   }
 
   reveal() {
+    if (State.gameMode) return;
     this.fsm.reveal();
   }
 
@@ -449,8 +511,9 @@ export class Island {
     this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
     this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
     this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
+    this.live.layout((PANEL_W - w) / 2, w, hh, r, State.mode);
 
-    const rect = { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+    const rect = this.hitRect();
     const p = this.pushedRect;
     if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
       this.pushedRect = rect;
@@ -462,6 +525,14 @@ export class Island {
     const w = this.width.value;
     const hh = this.height.value;
     return { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+  }
+
+  private hitRect(): { x: number; y: number; w: number; h: number } {
+    const rect = this.islandRect();
+    const bubble = this.live?.bubbleRect();
+    if (!bubble) return rect;
+    const right = Math.max(rect.x + rect.w, bubble.x + bubble.w);
+    return { x: rect.x, y: 0, w: right - rect.x, h: Math.max(rect.h, bubble.h) };
   }
 
   private updateWindowCollapsed() {
@@ -546,9 +617,10 @@ export class Island {
       UploadSeq.updateCursor(State.mouseInIsland.x, State.mouseInIsland.y);
     }
 
+    const hit = this.hitRect();
     const inIsland =
-      x >= rect.x - HIT_MARGIN && x <= rect.x + rect.w + HIT_MARGIN &&
-      y >= rect.y - HIT_MARGIN && y <= rect.y + rect.h + HIT_MARGIN;
+      x >= hit.x - HIT_MARGIN && x <= hit.x + hit.w + HIT_MARGIN &&
+      y >= hit.y - HIT_MARGIN && y <= hit.y + hit.h + HIT_MARGIN;
 
     if (inIsland && !this.wasInIsland) {
       if (this.fsm.state === "tako") this.greeting.hover();
@@ -657,6 +729,7 @@ export class Island {
     this.botCx.step(dt);
     this.botCy.step(dt);
     this.botSize.step(dt);
+    this.live.step(dt, this.botCx.value, this.botCy.value, this.botSize.value * 0.6);
 
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
     if (greetingActive) {
@@ -686,7 +759,7 @@ export class Island {
       ? settling
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive ||
+        greetingActive || this.engine.busy || UploadSeq.isActive || this.live.animating ||
         this.views.get(State.view)?.animating?.() === true;
 
     if (busy) {
@@ -824,8 +897,10 @@ export class Island {
       }
     }
 
+    const live = this.live.sync(State.mode, State.view);
+    this.fsm.setKeepCompact(Timer.active);
     const m = State.media;
-    const showStrip = State.mode === "compact" && State.settings.mediaEnabled && !!m?.active && !!m.playing;
+    const showStrip = State.mode === "compact" && live.primary === "music" && !!m?.active;
     this.mediaStrip.classList.toggle("on", showStrip);
     if (showStrip && m) {
       const key = `${m.title}~${m.art ? m.art.length : 0}`;

@@ -15,6 +15,10 @@ export class IslandStateMachine {
 
   pinned = false;
 
+  keepCompact = false;
+
+  suppressed = false;
+
   private petitHide: number | null = null;
   private homeCollapse: number | null = null;
   private greetCollapse: number | null = null;
@@ -24,7 +28,30 @@ export class IslandStateMachine {
     this.transition("tako");
   }
 
+  setKeepCompact(on: boolean) {
+    if (this.keepCompact === on) return;
+    this.keepCompact = on;
+    if (on && this.state === "hidden" && !this.suppressed) {
+      this.cancelTimers();
+      this.transition("petit");
+    } else if (!on && this.state === "petit") {
+      this.schedulePetitHide();
+    }
+  }
+
+  setSuppressed(on: boolean) {
+    if (this.suppressed === on) return;
+    this.suppressed = on;
+    if (on) {
+      this.cancelTimers();
+      this.transition("hidden");
+    } else if (this.keepCompact && this.state === "hidden") {
+      this.transition("petit");
+    }
+  }
+
   mouseEntered() {
+    if (this.suppressed) return;
     switch (this.state) {
       case "hidden":
         this.cancelTimers();
@@ -60,7 +87,7 @@ export class IslandStateMachine {
   }
 
   click() {
-    if (this.state !== "petit") return;
+    if (this.state !== "petit" || this.suppressed) return;
     this.cancelTimers();
     this.transition("home");
   }
@@ -71,18 +98,20 @@ export class IslandStateMachine {
   }
 
   reveal() {
-    if (this.state !== "hidden") return;
+    if (this.state !== "hidden" || this.suppressed) return;
     this.cancelTimers();
     this.transition("petit");
     this.schedulePetitHide();
   }
 
   forceHome() {
+    if (this.suppressed) return;
     this.cancelTimers();
     this.transition("home");
   }
 
   forcePetit() {
+    if (this.suppressed) return;
     this.cancelTimers();
     this.transition("petit");
   }
@@ -96,7 +125,7 @@ export class IslandStateMachine {
     this.clear("petitHide");
     this.petitHide = window.setTimeout(() => {
       this.petitHide = null;
-      if (this.state === "petit") this.transition("hidden");
+      if (this.state === "petit" && !this.keepCompact) this.transition("hidden");
     }, this.petitToHiddenDelay * 1000);
   }
 

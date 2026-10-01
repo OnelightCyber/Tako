@@ -23,7 +23,10 @@ export type IslandViewName =
   | "mission"
   | "music"
   | "system"
-  | "usage";
+  | "usage"
+  | "timer"
+  | "bluetooth"
+  | "vpn";
 
 export type BotStateName =
   | "idle"
@@ -55,7 +58,7 @@ export const PANEL_H = 440;
 
 export const GROW = 1.3;
 
-export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished"]);
+export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished", "mission", "vpn"]);
 
 export interface SizeHint {
   view: IslandViewName;
@@ -100,6 +103,9 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   music: { height: 176, botX: 56, botY: null, botDiameter: 0, agentMode: "none" },
   system: { height: 176, botX: 56, botY: null, botDiameter: 46, agentMode: "none" },
   usage: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
+  timer: { height: 176, botX: 80, botY: 108, botDiameter: 50, agentMode: "none" },
+  bluetooth: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
+  vpn: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
 };
 
 export function chatPromptHeight(messageCount: number): number {

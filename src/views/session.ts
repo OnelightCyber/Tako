@@ -90,16 +90,20 @@ function fitToContent(view: HTMLElement, panel: HTMLElement, body: HTMLElement) 
   setSizeHint("session", w, h);
 }
 
+const HANDS_FREE: Record<string, string> = { auto: "auto", acceptEdits: "auto-edit", bypassPermissions: "bypass", dontAsk: "auto" };
+
 function subtitle(task: AgentTask): string {
+  const mode = task.permissionMode ? HANDS_FREE[task.permissionMode] : undefined;
+  const base = mode ? `Claude Code · ${mode}` : "Claude Code";
   switch (task.state) {
-    case "thinking": return "Claude Code · thinking";
-    case "working": return "Claude Code · working";
-    case "approval": return "Claude Code · needs you";
-    case "question": return "Claude Code · asking";
-    case "error": return "Claude Code · error";
-    case "ratelimit": return "Claude Code · rate limited";
-    case "finished": return "Claude Code · done";
-    default: return "Claude Code";
+    case "thinking": return `${base} · thinking`;
+    case "working": return `${base} · working`;
+    case "approval": return `${base} · needs you`;
+    case "question": return `${base} · asking`;
+    case "error": return `${base} · error`;
+    case "ratelimit": return `${base} · rate limited`;
+    case "finished": return `${base} · done`;
+    default: return base;
   }
 }
 

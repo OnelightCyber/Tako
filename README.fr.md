@@ -92,7 +92,8 @@ passé et les tokens utilisés. Trois boutons :
 
 En option : chaque modification de fichier attend ton OK dans l'îlot, avec le vrai diff et les numéros de ligne —
 **Valider**, **Refuser**, ou tout valider pour le tour. Pas de réponse : la modif n'est pas appliquée. Tako fermé :
-Claude Code fonctionne comme d'habitude.
+Claude Code fonctionne comme d'habitude. Une session en **mode auto** de Claude Code (ou acceptEdits / bypass) n'est
+jamais retenue : Tako lit le mode de la session et l'affiche dans la vue live.
 
 ### Missions
 
@@ -114,12 +115,15 @@ n'existait pas.
   prend lui-même une capture et la regarde.
 - **Commandes `/`** : tape `/` et Tako propose les commandes et skills de Claude Code (`/code-review`, `/simplify`,
   `/usage`, `/context`…), au clavier ou à la souris.
-- **Lecture seule** : il répond, il ne modifie jamais rien. Un bouton vide la conversation.
+- **Ouvre tes applis** : « ouvre Spotify », « lance Discord » — le chat ouvre l'appli installée du menu Démarrer et
+  la laisse ouverte. Il ne ferme jamais rien.
+- **Lecture seule** sinon : il ne modifie jamais tes fichiers. Un bouton vide la conversation.
 
 ### Agent navigateur
 
 Active l'agent et le chat pilote un **vrai navigateur** (Playwright) : il ouvre des sites, lit les pages, clique,
-remplit des formulaires. Le navigateur **reste ouvert** entre les messages, avec un profil à lui. Par défaut,
+remplit des formulaires. Tako lance ton propre Chrome (ou Edge) avec un profil à lui et le chat s'y connecte : la
+fenêtre **reste ouverte** entre les messages et après chaque réponse — c'est toi qui la fermes. Par défaut,
 chaque action qui agit — ouvrir une page, cliquer, taper, exécuter du JavaScript — t'est demandée dans l'îlot avec
 l'URL ou le texte exact ; le **mode auto** laisse tout passer.
 
@@ -139,6 +143,16 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
 - **Musique en cours** : Spotify, YouTube, Deezer… avec la pochette, précédent / lecture / suivant et la barre de
   progression, et un mini égaliseur dans l'îlot replié.
 - **Ton PC** : processeur, mémoire et carte graphique en direct, dans une pastille.
+- **L'îlot se divise en deux** : quand deux choses tournent en même temps — Claude qui bosse et un minuteur, un
+  minuteur et la musique — une petite bulle se détache de l'îlot comme une goutte, avec une animation gluante.
+  Clique-la pour ouvrir ce qu'elle montre.
+- **Minuteur & Pomodoro** : cycles focus / pause / grande pause, le temps dans un anneau autour du personnage, une
+  alarme animée, et l'îlot reste visible tant qu'il tourne.
+- **Mode jeu** : un jeu ou une vidéo en plein écran et rien ne s'ouvre — l'îlot et le widget se cachent, les clics
+  vont au jeu, les sons se coupent. À ton retour, une ligne te dit ce que tu as raté.
+- **Bluetooth** : un casque se connecte et l'îlot l'affiche avec sa batterie, comme sur iPhone.
+- **Surveillance du VPN** : Mullvad, WireGuard, NordVPN, Proton… si le tunnel tombe, une alerte rouge te prévient que
+  ton IP réelle est visible ; quand il revient, une verte avec le lieu.
 
 ### Et aussi
 
@@ -428,7 +442,6 @@ docs/                     bannière, GIF et captures
 - [x] **Missions** depuis un raccourci global
 - [x] Alertes de limite, prévision et historique ; musique ; stats du PC
 - [ ] Réglages en anglais
-- [ ] **Mode jeu** : rien ne s'ouvre pendant un jeu en plein écran
 - [ ] **Monitoring serveurs** : up / down, CPU, RAM, disque, conteneurs
 - [ ] **Garde-fous de session** : bloquer les commandes dangereuses, signaler l'accès aux secrets
 - [ ] Installeur signé

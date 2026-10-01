@@ -111,7 +111,7 @@ pub fn sync(app: &AppHandle, s: &Settings) {
         let _ = items.usage.set_checked(s.usage_widget);
     }
     let Some(win) = app.get_webview_window(LABEL) else { return };
-    let _ = if s.usage_widget { win.show() } else { win.hide() };
+    let _ = if s.usage_widget && !crate::game::active() { win.show() } else { win.hide() };
 }
 
 fn store(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Settings {

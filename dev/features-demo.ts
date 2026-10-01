@@ -1,5 +1,6 @@
 import type { Island } from "../src/island/island";
 import { State, type AgentTask } from "../src/core/state";
+import { Timer } from "../src/core/timer";
 import { colorForProject, type IslandViewName } from "../src/core/layout";
 
 function art(): string {
@@ -73,6 +74,7 @@ function seed() {
 export function runFeatureDemo(island: Island, kind: string) {
   (window as unknown as { __island: Island; __state: typeof State }).__island = island;
   (window as unknown as { __state: typeof State }).__state = State;
+  (window as unknown as { __timer: typeof Timer }).__timer = Timer;
   seed();
   const show = () => {
     State.isPinned = true;
@@ -120,6 +122,43 @@ export function runFeatureDemo(island: Island, kind: string) {
     } else if (kind === "usage") {
       State.usageAlert = { kind: "session", percent: 82, threshold: 80, resets: "Oct 1, 11:30pm (Europe/Paris)", forecastAt: Math.floor(Date.now() / 1000) + 50 * 60 };
       view = "usage";
+    } else if (kind === "timer" || kind === "timer-idle" || kind === "timer-done") {
+      if (kind === "timer") Timer.startPomodoro();
+      if (kind === "timer-idle") Timer.stop();
+      if (kind === "timer-done") {
+        Timer.startMinutes(1);
+        if (Timer.state) {
+          Timer.state.endsAt = Date.now() + 300;
+        }
+        window.setTimeout(() => Timer.addMinutes(0), 800);
+      }
+      view = "timer";
+    } else if (kind === "bluetooth") {
+      State.btEvent = { name: "AirPods Pro", kind: "headphones", connected: true, battery: 82, address: "A0B1C2D3E4F5", test: false };
+      view = "bluetooth";
+    } else if (kind === "vpn" || kind === "vpn-up") {
+      State.vpnEvent = kind === "vpn"
+        ? { kind: "down", name: "Mullvad", location: "", test: false }
+        : { kind: "up", name: "Mullvad", location: "Switzerland, Zurich", test: false };
+      view = "vpn";
+    } else if (kind === "split" || kind === "split-music") {
+      State.tasks[0].state = kind === "split" ? "working" : "idle";
+      State.tasks.forEach((t) => {
+        if (t.sessionId && kind === "split-music") t.state = "idle";
+      });
+      Timer.startPomodoro();
+      State.isPinned = false;
+      island.collapse();
+      State.notify();
+      return;
+    } else if (kind === "game") {
+      island.setGameMode(true, "Roblox");
+      State.tasks[0].state = "finished";
+      island.alert("finished");
+      State.vpnEvent = { kind: "down", name: "Mullvad", location: "", test: false };
+      island.alert("vpn");
+      window.setTimeout(() => island.setGameMode(false, "Roblox"), 1200);
+      return;
     }
     island.alert(view);
     State.notify();

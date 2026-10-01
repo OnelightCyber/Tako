@@ -299,7 +299,7 @@ pub fn spawn_drag_watch(app: AppHandle, gate: Arc<PollGate>) {
                 fired = false;
                 continue;
             }
-            if fired || gate.is_active() {
+            if fired || gate.is_active() || crate::game::active() {
                 continue;
             }
             let Some(win) = window(&app) else { continue };

@@ -498,7 +498,14 @@ function chatPage(): Node[] {
     row("Modèle", "Pour le chat par clé API. Avec Claude Code, c'est ton modèle par défaut qui répond.", model, "cpu"),
   );
 
-  return [pageHeader("Chat & agent", "Parle à Claude depuis l'îlot, et laisse-le agir pour toi."), backend, vision, agent, api];
+  const apps = card(
+    cardHead("Applications", pill(ctx.settings.chatApps, ctx.settings.chatApps ? "Activé" : "Désactivé"), "apps"),
+    row("Ouvrir des applis pour toi", "« Ouvre Spotify », « lance Discord » : le chat ouvre l'appli installée et la laisse ouverte. Il ne ferme jamais rien : c'est toi qui fermes.",
+      toggle(ctx.settings.chatApps, (v) => { ctx.settings.chatApps = v; void save(v ? "Applications activées" : "Applications désactivées"); }, !ctx.cc.found), "apps"),
+    h("p", { class: "muted small", text: "Seules les applis du menu Démarrer peuvent être ouvertes. Chaque ouverture t'est demandée dans l'îlot, sauf en mode auto." }),
+  );
+
+  return [pageHeader("Chat & agent", "Parle à Claude depuis l'îlot, et laisse-le agir pour toi."), backend, vision, apps, agent, api];
 }
 
 function chip(iconName: ProIconName, text: string, kind: "" | "warn" = ""): HTMLElement {
@@ -625,7 +632,65 @@ function islandPage(): Node[] {
       row("Stats du PC", "Processeur, mémoire et carte graphique en direct.",
         toggle(ctx.settings.statsEnabled, (v) => { ctx.settings.statsEnabled = v; void save(); }), "cpu"),
     ),
+    gameCard(),
+    timerCard(),
+    alertsCard(),
   ];
+}
+
+function gameCard(): HTMLElement {
+  const status = h("span", { class: "muted small", text: "Aucun jeu en plein écran." });
+  void Bridge.gameStatus().then((g) => {
+    if (g?.active) status.textContent = `Actif : ${g.app || "plein écran"}`;
+  });
+  return card(
+    cardHead("Mode jeu", undefined, "gameMode"),
+    h("p", { class: "muted", text: "Quand un jeu ou une vidéo est en plein écran, rien ne s'ouvre : l'îlot et le widget se cachent, les clics passent au jeu. À la sortie, Tako te dit ce que tu as raté." }),
+    row("Mode jeu automatique", null, toggle(ctx.settings.gameMode, (v) => { ctx.settings.gameMode = v; void save(v ? "Mode jeu activé" : "Mode jeu désactivé"); }), "gameMode"),
+    row("Couper les sons de Tako en jeu", "Le minuteur sonne quand même.", toggle(ctx.settings.gameMute, (v) => { ctx.settings.gameMute = v; void save(); }), "volume"),
+    h("div", { class: "row-desc" }, status),
+  );
+}
+
+function timerCard(): HTMLElement {
+  const minutes = (values: number[]) => values.map((m) => ({ value: String(m), label: `${m} min` }));
+  const pick = (values: number[], current: number, apply: (v: number) => void) =>
+    dropdown(minutes(values), String(current), (v) => { apply(Number(v)); void save(); });
+  const rounds = dropdown([2, 3, 4, 5, 6].map((n) => ({ value: String(n), label: `${n} focus` })), String(ctx.settings.pomodoroRounds), (v) => {
+    ctx.settings.pomodoroRounds = Number(v);
+    void save();
+  });
+  return card(
+    cardHead("Minuteur & Pomodoro", undefined, "timer"),
+    h("p", { class: "muted", text: "Lance-le depuis l'onglet minuteur de l'îlot. Le temps reste affiché autour du blob, et l'îlot se divise en deux quand Claude travaille en même temps." }),
+    row("Focus", null, pick([15, 20, 25, 30, 45, 50, 60, 90], ctx.settings.pomodoroFocus, (v) => (ctx.settings.pomodoroFocus = v)), "timer"),
+    row("Pause", null, pick([3, 5, 10, 15], ctx.settings.pomodoroBreak, (v) => (ctx.settings.pomodoroBreak = v)), "clock"),
+    row("Grande pause", null, pick([10, 15, 20, 30], ctx.settings.pomodoroLong, (v) => (ctx.settings.pomodoroLong = v)), "clock"),
+    row("Grande pause après", null, rounds, "layers"),
+  );
+}
+
+function alertsCard(): HTMLElement {
+  const vpnLine = h("span", { class: "muted small", text: "Recherche d'un VPN…" });
+  void Bridge.vpnStatus().then((s) => {
+    if (!s) {
+      vpnLine.textContent = "Disponible dans l'app Tako.";
+      return;
+    }
+    vpnLine.textContent = !s.present ? "Aucun VPN détecté sur ce PC." : s.up ? `${s.name} connecté${s.location ? ` · ${s.location}` : ""}` : `${s.name} déconnecté`;
+  });
+  const testBt = button("Tester", "", () => void Bridge.bluetoothTest(), "play");
+  testBt.classList.add("small");
+  const testVpn = button("Tester", "", () => void Bridge.vpnTest(), "play");
+  testVpn.classList.add("small");
+  return card(
+    cardHead("Bluetooth & VPN", undefined, "shield"),
+    row("Animation à la connexion d'un casque", "Le nom, l'icône et la batterie, comme sur iPhone.",
+      h("div", { class: "inline" }, testBt, toggle(ctx.settings.btAnimation, (v) => { ctx.settings.btAnimation = v; void save(); })), "headphones"),
+    row("Alerte si le VPN se coupe", "Mullvad, WireGuard, NordVPN, Proton… Tako te prévient dès que ton IP réelle est visible.",
+      h("div", { class: "inline" }, testVpn, toggle(ctx.settings.vpnAlerts, (v) => { ctx.settings.vpnAlerts = v; void save(); })), "shield"),
+    h("div", { class: "row-desc" }, vpnLine),
+  );
 }
 
 const USAGE_SPOTS: [Settings["usagePosition"], string][] = [
