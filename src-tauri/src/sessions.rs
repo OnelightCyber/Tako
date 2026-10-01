@@ -22,33 +22,6 @@ const KEEP_FOR_MS: u128 = 3 * 24 * 3600 * 1000;
 const CONTEXT_EVERY: Duration = Duration::from_millis(1500);
 const MAX_TASK_CHARS: usize = 4000;
 const MAX_DIFF_CHARS: usize = 60_000;
-const MAX_STORE_BYTES: u64 = 1024 * 1024 * 1024;
-
-const SECRET_NAMES: &[&str] = &[
-    ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials", "credentials.json", "secrets.json",
-    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-];
-const SECRET_EXTENSIONS: &[&str] = &["pem", "key", "pfx", "p12", "keystore", "jks", "kdbx", "ovpn"];
-const SECRET_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg", ".azure", ".kube", ".docker"];
-
-pub fn sensitive(path: &Path) -> bool {
-    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if SECRET_NAMES.iter().any(|s| name == *s || name.starts_with(&format!("{s}."))) {
-        return true;
-    }
-    if name.starts_with("id_") && !name.contains('.') {
-        return true;
-    }
-    if let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) {
-        if SECRET_EXTENSIONS.contains(&ext.as_str()) {
-            return true;
-        }
-    }
-    path.components().any(|c| {
-        let part = c.as_os_str().to_string_lossy().to_lowercase();
-        SECRET_DIRS.contains(&part.as_str())
-    })
-}
 
 #[derive(Default)]
 pub struct Sessions {
@@ -433,16 +406,11 @@ pub fn undo(session: &str) -> Result<UndoReport, String> {
         if original.as_deref() == Some(current.as_str()) {
             continue;
         }
-        match &entry.after_hash {
-            Some(after) if after != &current => {
+        if let Some(after) = &entry.after_hash {
+            if after != &current {
                 report.skipped.push(format!("{shown} — changed since Claude edited it"));
                 continue;
             }
-            None => {
-                report.skipped.push(format!("{shown} — no record of Claude's edit, left as is"));
-                continue;
-            }
-            _ => {}
         }
         let result = if entry.existed {
             match &entry.backup {
@@ -473,12 +441,6 @@ fn unified(session: &str) -> Result<(String, Vec<PathBuf>), String> {
     let mut text = String::new();
     let mut files = Vec::new();
     for entry in entries(&store) {
-        if sensitive(&entry.path) {
-            let name = entry.path.to_string_lossy().replace('\\', "/");
-            text.push_str(&format!("--- a/{name}\n+++ b/{name}\n@@ sensitive file, contents hidden @@\n"));
-            files.push(entry.path);
-            continue;
-        }
         let (Some(before), Some(after)) = (before_text(&entry), current_text(&entry.path)) else { continue };
         if before == after {
             continue;
@@ -514,15 +476,12 @@ fn repo_files(session: &str, cwd: &str) -> Result<(PathBuf, Vec<String>), String
     let (_, files) = unified(session)?;
     let mut relative = Vec::new();
     for path in files {
-        if sensitive(&path) {
-            continue;
-        }
         let Ok(full) = fs::canonicalize(&path) else { continue };
         let Ok(rest) = full.strip_prefix(&root) else { continue };
         relative.push(rest.to_string_lossy().replace('\\', "/"));
     }
     if relative.is_empty() {
-        return Err("None of the changed files can be committed from here (outside the repository, or sensitive).".into());
+        return Err("None of the changed files are in this repository.".into());
     }
     Ok((root, relative))
 }
@@ -695,45 +654,11 @@ pub fn cleanup() {
     }
 }
 
-fn dir_size(dir: &Path) -> u64 {
-    fs::read_dir(dir)
-        .map(|list| list.flatten().map(|i| i.metadata().map(|m| m.len()).unwrap_or(0)).sum())
-        .unwrap_or(0)
-}
-
-pub fn enforce_quota() {
-    let root = settings::local_dir().join("snapshots");
-    let mut turns: Vec<(u128, PathBuf, u64)> = Vec::new();
-    let Ok(sessions) = fs::read_dir(&root) else { return };
-    for session in sessions.flatten() {
-        let Ok(list) = fs::read_dir(session.path()) else { continue };
-        for turn in list.flatten() {
-            let id = turn.file_name().to_str().and_then(|n| n.parse::<u128>().ok()).unwrap_or(0);
-            let size = dir_size(&turn.path());
-            turns.push((id, turn.path(), size));
-        }
-    }
-    let mut total: u64 = turns.iter().map(|t| t.2).sum();
-    turns.sort_by_key(|t| t.0);
-    for (_, path, size) in turns {
-        if total <= MAX_STORE_BYTES {
-            break;
-        }
-        if fs::remove_dir_all(&path).is_ok() {
-            total = total.saturating_sub(size);
-        }
-    }
-}
-
 pub fn start_cleanup() {
     tauri::async_runtime::spawn(async {
         loop {
-            let _ = tauri::async_runtime::spawn_blocking(|| {
-                cleanup();
-                enforce_quota();
-            })
-            .await;
-            tokio::time::sleep(Duration::from_secs(3600)).await;
+            let _ = tauri::async_runtime::spawn_blocking(cleanup).await;
+            tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
         }
     });
 }
@@ -845,13 +770,6 @@ mod tests {
 
         TEST_DIR.with(|d| *d.borrow_mut() = None);
         let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn sensitive_paths_match_the_relay() {
-        assert!(sensitive(Path::new(r"C:\\p\\.env.production")));
-        assert!(sensitive(Path::new(r"C:\\u\\.ssh\\known_hosts")));
-        assert!(!sensitive(Path::new(r"C:\\p\\src\\env.rs")));
     }
 
     #[test]

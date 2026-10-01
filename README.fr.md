@@ -291,15 +291,6 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
   Claude Code continue. Une exécution du relais tient dans 2 s, 110 s quand un humain doit répondre.
 - **Silence = comportement normal.** Pas de réponse à une permission : le terminal reprend la main.
 - **Les actions de l'agent échouent fermées.** Pas de décision, pas d'action.
-- **Le mode relecture échoue fermé quand Tako tourne** : pas de réponse à temps, Tako en pause, ou trop de modifs
-  d'un coup — la modif est refusée. Il couvre les fichiers, pas les commandes. Tako fermé : Claude Code applique ses
-  propres permissions. Un « autoriser » de Tako ne passe jamais outre tes règles `permissions.deny`.
-- **Pas de clic qui dérape** : une permission ou une relecture qui vient d'apparaître ignore les clics pendant
-  0,7 s, un double-clic ne valide jamais la suivante.
-- **Les copies pour Annuler restent sur ton PC** : avant chaque modif, une copie du fichier va dans
-  `%LOCALAPPDATA%\Tako\snapshots` pendant 3 jours (10 Mo par fichier, 1 Go au total). Les fichiers sensibles —
-  `.env`, clés, certificats, `.ssh`, `.aws`… — ne sont jamais copiés, leur contenu n'est jamais envoyé à Claude pour
-  écrire un message de commit, et le bouton Commit ne les committe pas.
 - **`settings.json` n'est jamais écrasé** : fusion, diff affiché, sauvegarde datée, écriture seulement après ton clic
   et seulement si le fichier n'a pas changé depuis le diff.
 - **Aucune permission accordée sans clic explicite.**
@@ -308,11 +299,10 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
 - **Pas de télémétrie.** Les requêtes réseau vont vers les services que tu configures, et vers Claude via ton propre
   Claude Code.
 - **Rien n'est injecté en HTML** : le code de tes fichiers est construit nœud par nœud, jamais via `innerHTML`.
-- **0 % de CPU caché** : animations, suivi du curseur, musique et stats du PC s'arrêtent ; seules 8 lectures Win32
-  par seconde guettent un fichier glissé vers l'îlot caché.
+- **0 % de CPU caché** : animations et suivi du curseur s'arrêtent ; seules 8 lectures Win32 par seconde guettent un
+  fichier glissé vers l'îlot caché.
 - **Le relais vérifie à qui il parle** : le pipe nommé est lié à ton compte Windows (SID) et le serveur est contrôlé
-  avant chaque envoi. Les programmes qui tournent sous ton propre compte sont considérés comme fiables, comme pour
-  tout ce qu'ils peuvent déjà faire en ton nom.
+  avant chaque envoi.
 
 ---
 

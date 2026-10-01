@@ -113,7 +113,7 @@ function agentTarget(tool: string, input: Record<string, unknown>): string {
 
 const MAX_SESSIONS = 6;
 const STALE_MS = 45 * 60_000;
-const DECISION_MS = 94_000;
+const DECISION_MS = 104_000;
 const CLICK_GUARD_MS = 700;
 
 let approvalTimer: number | null = null;
@@ -276,8 +276,7 @@ function request(island: Island, info: ApprovalInfo) {
     return;
   }
   if (State.approvalQueue.length >= 6) {
-    if (info.kind === "review") void Bridge.approvalDecision(info.requestId, "deny");
-    else void Bridge.approvalDecline(info.requestId);
+    void Bridge.approvalDecline(info.requestId);
     return;
   }
   State.approvalQueue.push(info);
@@ -357,12 +356,7 @@ export function registerHookHandlers(island: Island) {
 
 export function handleHook(island: Island, payload: HookPayload) {
   if (State.paused) {
-    if (payload.request_id && payload.tako_review) {
-      void Bridge.approvalAck(payload.request_id);
-      void Bridge.approvalDecision(payload.request_id, "deny");
-    } else if (payload.request_id) {
-      void Bridge.approvalDecline(payload.request_id);
-    }
+    if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
     return;
   }
 
