@@ -6,7 +6,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
 const FIRE_AND_FORGET_BUDGET: Duration = Duration::from_secs(2);
 
-const DECISION_BUDGET: Duration = Duration::from_secs(110);
+const DECISION_BUDGET: Duration = Duration::from_secs(100);
 
 const ERROR_PIPE_BUSY: i32 = 231;
 
@@ -91,10 +91,11 @@ fn main() {
         mcp::serve();
         return;
     }
+    let started = Instant::now();
     let Some((payload, wait)) = read_event() else { std::process::exit(0) };
 
     let waits_for_answer = wait != Wait::None;
-    let budget = if waits_for_answer { DECISION_BUDGET } else { FIRE_AND_FORGET_BUDGET };
+    let budget = if waits_for_answer { DECISION_BUDGET.saturating_sub(started.elapsed()) } else { FIRE_AND_FORGET_BUDGET };
 
     let (tx, rx) = mpsc::channel::<Talk>();
     std::thread::spawn(move || {

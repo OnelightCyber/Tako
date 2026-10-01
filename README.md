@@ -289,6 +289,14 @@ exactly what happens here: everyone uses their own account, on their own machine
   Claude Code carries on. A relay run fits in 2 s, 110 s when a human has to answer.
 - **Silence means business as usual.** No answer to a permission: the terminal takes over.
 - **Agent actions fail closed.** No decision, no action.
+- **Review mode fails closed while Tako runs**: no answer in time, Tako paused, or too many edits at once — the edit
+  is rejected. It covers file edits, not commands. Tako closed: Claude Code applies its own permissions. A Tako
+  "allow" never overrides your `permissions.deny` rules.
+- **Clicks can't slip**: a permission or a review that just appeared ignores clicks for 0.7 s, so a double-click
+  never approves the next one.
+- **Undo copies stay on your PC**: before each edit, a copy of the file goes to `%LOCALAPPDATA%\Tako\snapshots` for
+  3 days (10 MB per file, 1 GB in total). Sensitive files — `.env`, keys, certificates, `.ssh`, `.aws`… — are never
+  copied, and their contents are never sent to Claude to write a commit message, nor committed by the Commit button.
 - **`settings.json` is never overwritten**: merge, diff shown, dated backup, written only after your click and only
   if the file hasn't changed since the diff.
 - **No permission is granted without an explicit click.**
@@ -296,10 +304,11 @@ exactly what happens here: everyone uses their own account, on their own machine
   a key exists.
 - **No telemetry.** Network requests only go to the services you set up, and to Claude through your own Claude Code.
 - **Nothing is injected as HTML**: code from your files is built node by node, never through `innerHTML`.
-- **0 % CPU while hidden**: animations and the cursor poll stop; only 8 Win32 reads per second watch for a file being
-  dragged towards the hidden island.
+- **0 % CPU while hidden**: animations, the cursor poll, music and PC stats stop; only 8 Win32 reads per second watch
+  for a file being dragged towards the hidden island.
 - **The relay checks who it talks to**: the named pipe is bound to your Windows account (SID) and the server is
-  verified before anything is sent.
+  verified before anything is sent. Programs running under your own account are trusted, like everything else they
+  can already do as you.
 
 ---
 

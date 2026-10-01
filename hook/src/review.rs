@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use similar::{ChangeTag, TextDiff};
@@ -6,6 +7,8 @@ use similar::{ChangeTag, TextDiff};
 const MAX_LINES: usize = 300;
 const MAX_TEXT: usize = 400;
 const MAX_READ: u64 = 2 * 1024 * 1024;
+const MAX_PROPOSED: usize = 2 * 1024 * 1024;
+const DIFF_TIMEOUT: Duration = Duration::from_millis(1500);
 
 fn apply(text: &str, edit: &Value) -> Option<String> {
     let old = edit.get("old_string")?.as_str()?;
@@ -60,7 +63,7 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 pub fn diff_lines(before: &str, after: &str) -> Value {
-    let diff = TextDiff::from_lines(before, after);
+    let diff = TextDiff::configure().timeout(DIFF_TIMEOUT).diff_lines(before, after);
     let mut lines: Vec<Value> = Vec::new();
     let (mut added, mut removed) = (0usize, 0usize);
     let mut truncated = false;
@@ -102,6 +105,9 @@ pub fn preview(tool: &str, input: &Value, path: &Path) -> Value {
     let Some(after) = proposed(tool, input, &before) else {
         return json!({ "path": path, "created": !existed, "unknown": true });
     };
+    if after.len() > MAX_PROPOSED {
+        return json!({ "path": path, "created": !existed, "unreadable": true });
+    }
     let mut out = diff_lines(&before, &after);
     out["path"] = json!(path);
     out["created"] = json!(!existed);

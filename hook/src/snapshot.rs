@@ -9,6 +9,33 @@ pub const EDIT_TOOLS: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit"];
 
 const MAX_SNAPSHOT_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_FILES_PER_TURN: usize = 400;
+const MAX_TURN_BYTES: u64 = 200 * 1024 * 1024;
+
+const SECRET_NAMES: &[&str] = &[
+    ".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials", "credentials.json", "secrets.json",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+];
+const SECRET_EXTENSIONS: &[&str] = &["pem", "key", "pfx", "p12", "keystore", "jks", "kdbx", "ovpn"];
+const SECRET_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg", ".azure", ".kube", ".docker"];
+
+pub fn sensitive(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if SECRET_NAMES.iter().any(|s| name == *s || name.starts_with(&format!("{s}."))) {
+        return true;
+    }
+    if name.starts_with("id_") && !name.contains('.') {
+        return true;
+    }
+    if let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) {
+        if SECRET_EXTENSIONS.contains(&ext.as_str()) {
+            return true;
+        }
+    }
+    path.components().any(|c| {
+        let part = c.as_os_str().to_string_lossy().to_lowercase();
+        SECRET_DIRS.contains(&part.as_str())
+    })
+}
 
 pub fn data_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Tako"))
@@ -92,13 +119,23 @@ pub fn before(dir: &Path, session: &str, path: &Path) {
     if store.join(format!("{name}.json")).exists() {
         return;
     }
-    if fs::read_dir(&store).map(|d| d.count()).unwrap_or(0) >= MAX_FILES_PER_TURN * 3 {
+    let (mut count, mut bytes) = (0usize, 0u64);
+    if let Ok(list) = fs::read_dir(&store) {
+        for item in list.flatten() {
+            count += 1;
+            bytes += item.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    if count >= MAX_FILES_PER_TURN * 3 {
         return;
     }
     let Ok(mut meta) = OpenOptions::new().write(true).create_new(true).open(store.join(format!("{name}.json"))) else {
         return;
     };
+    let full = bytes >= MAX_TURN_BYTES;
     let entry = match fs::metadata(path) {
+        Ok(m) if m.is_file() && sensitive(path) => json!({ "path": path, "existed": true, "skipped": true, "sensitive": true }),
+        Ok(m) if m.is_file() && full => json!({ "path": path, "existed": true, "skipped": true }),
         Ok(m) if m.is_file() && m.len() <= MAX_SNAPSHOT_BYTES => match fs::read(path) {
             Ok(bytes) if fs::write(store.join(format!("{name}.bak")), &bytes).is_ok() => json!({
                 "path": path,
@@ -172,6 +209,31 @@ mod tests {
         let meta = dir.join("snapshots").join("s2").join(turn).join(format!("{}.json", entry_name(&file)));
         let v: Value = serde_json::from_str(&fs::read_to_string(meta).unwrap()).unwrap();
         assert_eq!(v["existed"], false);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn secret_files_are_recognised() {
+        for p in [r"C:\p\.env", r"C:\p\.env.local", r"C:\p\server.key", r"C:\u\.ssh\config", r"C:\u\id_ed25519", r"C:\p\cert.PEM", r"C:\u\.aws\credentials"] {
+            assert!(sensitive(Path::new(p)), "{p}");
+        }
+        for p in [r"C:\p\src\main.rs", r"C:\p\environment.ts", r"C:\p\keys.ts", r"C:\p\id_card.png"] {
+            assert!(!sensitive(Path::new(p)), "{p}");
+        }
+    }
+
+    #[test]
+    fn secret_files_are_never_copied() {
+        let dir = scratch("secret");
+        let file = dir.join(".env");
+        fs::write(&file, "TOKEN=abc").unwrap();
+        before(&dir, "s3", &file);
+        let turn = read_turn(&dir, "s3").unwrap();
+        let store = dir.join("snapshots").join("s3").join(turn);
+        let name = entry_name(&file);
+        assert!(!store.join(format!("{name}.bak")).exists());
+        let v: Value = serde_json::from_str(&fs::read_to_string(store.join(format!("{name}.json"))).unwrap()).unwrap();
+        assert_eq!(v["sensitive"], true);
         let _ = fs::remove_dir_all(&dir);
     }
 

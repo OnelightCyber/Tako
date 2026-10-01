@@ -350,14 +350,14 @@ function claudePage(): Node[] {
     cardHead("Comportement", undefined, "sliders"),
     row("Ouvrir l'îlot quand Claude a fini", "Avec le bilan : fichiers, lignes, tokens, et les boutons Commit, Diff et Annuler. Sinon une simple pastille verte.",
       toggle(ctx.settings.openOnFinish, (v) => { ctx.settings.openOnFinish = v; void save(); }), "eye"),
-    row("Annuler un tour", "Avant chaque modification, Tako garde une copie du fichier pendant 3 jours, sur ton PC uniquement. Le bouton Annuler remet tout comme avant le tour, sauf les fichiers que tu as retouchés depuis.",
+    row("Annuler un tour", "Avant chaque modification, Tako garde une copie du fichier pendant 3 jours, sur ton PC uniquement (1 Go maximum). Le bouton Annuler remet tout comme avant le tour, sauf les fichiers retouchés depuis. Les fichiers sensibles (.env, clés, .ssh…) ne sont jamais copiés ni envoyés pour le message de commit.",
       h("span", { class: "muted small", text: "Toujours actif" }), "undo"),
   );
 
   const reviewReady = ctx.hooks.installed && ctx.hooks.upToDate;
   const review = card(
     cardHead("Mode relecture", pill(ctx.settings.reviewMode ? (reviewReady ? true : "warn") : false, ctx.settings.reviewMode ? "Actif" : "Désactivé"), "review"),
-    h("p", { class: "muted", text: "Chaque modification de fichier par Claude attend ton OK dans l'îlot, diff affiché, avant d'être écrite. Valider, refuser, ou tout valider pour le tour en cours. Si Tako est fermé, Claude Code continue normalement." }),
+    h("p", { class: "muted", text: "Chaque modification de fichier par Claude attend ton OK dans l'îlot, diff affiché, avant d'être écrite : valider, refuser, ou tout valider pour le tour. Pas de réponse, Tako en pause ou trop de modifs d'un coup : la modif est refusée. Ça concerne les fichiers, pas les commandes. Si Tako est fermé, Claude Code applique ses propres permissions." }),
     row("Relire chaque modification", reviewReady ? null : "Mets d'abord les hooks à jour (carte au-dessus).",
       toggle(ctx.settings.reviewMode, (v) => { ctx.settings.reviewMode = v; void save(v ? "Relecture activée" : "Relecture désactivée"); }, !reviewReady && !ctx.settings.reviewMode), "eye"),
   );
