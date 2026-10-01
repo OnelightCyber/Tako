@@ -1,7 +1,8 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName, SizeHint } from "./layout";
 import type { EyeShape } from "../mascot/engine";
 import type { Activity } from "./activity";
-import type { UsageReport } from "./bridge";
+import type { ContextInfo, SystemStats, Track, TurnSummary, UsageAlert, UsageReport } from "./bridge";
+import type { DiffLine } from "./activity";
 
 export type AgentSource = "claudeCode" | "n8n";
 export type PillBadge = "approval" | "finished" | "error";
@@ -23,6 +24,26 @@ export interface AgentTask {
   activity?: Activity[];
 
   prompt?: string | null;
+
+  sessionId?: string;
+  stepTotal?: number;
+  lastEventAt?: number;
+  context?: Omit<ContextInfo, "sessionId"> | null;
+  turn?: TurnSummary | null;
+  finalMessage?: string | null;
+  origin?: string | null;
+  reviewAll?: boolean;
+}
+
+export interface ReviewPreview {
+  path: string;
+  lines: DiffLine[];
+  added: number;
+  removed: number;
+  created: boolean;
+  truncated?: boolean;
+  unknown?: boolean;
+  unreadable?: boolean;
 }
 
 export interface ApprovalInfo {
@@ -31,7 +52,14 @@ export interface ApprovalInfo {
   tool: string;
   command: string;
   origin?: "session" | "chat";
+  kind: "permission" | "agent" | "review";
+  taskId?: string;
+  review?: ReviewPreview;
+  expiresAt: number;
+  shownAt?: number;
 }
+
+export const PLACEHOLDER_ID = "integration_claude";
 
 export interface ChatMessage {
   id: number;
@@ -105,6 +133,13 @@ export interface Settings {
   usagePosition: "island-right" | "island-left" | "corner-right" | "corner-left" | "custom";
   usageX: number;
   usageY: number;
+  usageAlerts: boolean;
+  usageRecharge: boolean;
+  reviewMode: boolean;
+  missionHotkey: string;
+  recentProjects: string[];
+  mediaEnabled: boolean;
+  statsEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -128,6 +163,13 @@ export const DEFAULT_SETTINGS: Settings = {
   usagePosition: "island-right",
   usageX: 0,
   usageY: 0,
+  usageAlerts: true,
+  usageRecharge: true,
+  reviewMode: false,
+  missionHotkey: "Alt+Shift+Space",
+  recentProjects: [],
+  mediaEnabled: true,
+  statsEnabled: true,
 };
 
 type Listener = () => void;
@@ -165,6 +207,12 @@ class AppState {
 
   chatStatus = "";
   pendingApproval: ApprovalInfo | null = null;
+  approvalQueue: ApprovalInfo[] = [];
+
+  media: Track | null = null;
+  stats: SystemStats | null = null;
+  usage: UsageReport | null = null;
+  usageAlert: UsageAlert | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
 
@@ -183,8 +231,15 @@ class AppState {
     for (const fn of this.listeners) fn();
   }
 
+  get sessions(): AgentTask[] {
+    return this.tasks.filter((t) => !!t.sessionId);
+  }
+
   get focusTask(): AgentTask | null {
-    return this.tasks.find((t) => t.id === this.focusId) ?? this.tasks[0] ?? null;
+    const found = this.tasks.find((t) => t.id === this.focusId);
+    if (found && !(found.id === PLACEHOLDER_ID && this.sessions.length > 0)) return found;
+    const recent = [...this.sessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
+    return recent ?? this.tasks[0] ?? null;
   }
 
   get effectiveState(): BotStateName {
@@ -192,7 +247,23 @@ class AppState {
   }
 
   get otherTasks(): AgentTask[] {
-    return this.tasks.filter((t) => t.id !== this.focusId);
+    const focus = this.focusTask?.id;
+    const hidePlaceholder = this.sessions.length > 0;
+    const others = this.tasks.filter((t) => t.id !== focus && !(hidePlaceholder && t.id === PLACEHOLDER_ID));
+    const sessions = others.filter((t) => t.sessionId).sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0));
+    return [...sessions, ...others.filter((t) => !t.sessionId)];
+  }
+
+  sessionTask(sessionId: string): AgentTask | undefined {
+    return this.tasks.find((t) => t.sessionId === sessionId);
+  }
+
+  removeTask(id: string) {
+    const i = this.tasks.findIndex((t) => t.id === id);
+    if (i < 0) return;
+    this.tasks.splice(i, 1);
+    if (this.focusId === id) this.focusId = null;
+    this.notify();
   }
 
   setFocus(id: string) {
@@ -216,6 +287,7 @@ class AppState {
     t.steps.push(step);
     if (t.steps.length > 20) t.steps.shift();
     t.stepIndex = t.steps.length - 1;
+    t.stepTotal = (t.stepTotal ?? 0) + 1;
     this.notify();
   }
 
@@ -236,17 +308,18 @@ class AppState {
     }
 
     const order = INTEGRATION_AGENTS.map((t) => t.id);
-    this.tasks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    if (!this.focusId) this.focusId = "integration_claude";
+    const rank = (t: AgentTask) => (t.sessionId ? -1 : order.indexOf(t.id));
+    this.tasks.sort((a, b) => rank(a) - rank(b));
+    if (!this.focusId) this.focusId = PLACEHOLDER_ID;
     this.notify();
   }
 
   toggleIntegration(id: string) {
-    if (id === "integration_claude") return;
+    if (id === PLACEHOLDER_ID) return;
     const active = this.settings.activeIntegrations;
     if (active.includes(id)) {
       this.settings.activeIntegrations = active.filter((x) => x !== id);
-      if (this.focusId === id) this.focusId = "integration_claude";
+      if (this.focusId === id) this.focusId = PLACEHOLDER_ID;
     } else {
       if (active.length >= 4) return;
       this.settings.activeIntegrations = [...active, id];
@@ -257,7 +330,7 @@ class AppState {
   get sessionLive(): boolean {
     const t = this.focusTask;
     return (
-      t?.source === "claudeCode" &&
+      !!t?.sessionId &&
       (t.state !== "idle" || (t.activity?.length ?? 0) > 0 || !!t.prompt)
     );
   }

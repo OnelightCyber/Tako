@@ -67,6 +67,9 @@ const steps: [number, HookPayload][] = [
 const STOPS: Record<string, number> = { plan: 3, read: 5, edit: 6, diff: 9, shell: 11, done: 12 };
 
 export function runSessionDemo(island: Island) {
+  (window as unknown as { __island: Island }).__island = island;
+  (window as unknown as { __hook: (p: HookPayload) => void }).__hook = (p) => handleHook(island, p);
+  if (new URLSearchParams(location.search).has("manual")) return;
   const until = STOPS[new URLSearchParams(location.search).get("until") ?? ""] ?? steps.length - 1;
   State.isPinned = true;
   let t = 4200;

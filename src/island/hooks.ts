@@ -1,12 +1,9 @@
-import { Bridge, onEvent } from "../core/bridge";
+import { Bridge, onEvent, type ContextInfo, type TurnSummary } from "../core/bridge";
 import { activityFromPre, applyPost, type Activity } from "../core/activity";
+import { colorForProject } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, type AgentTask, type ApprovalInfo, type ReviewPreview } from "../core/state";
 import type { Island } from "./island";
-
-const CLAUDE_ID = "integration_claude";
-
-let pendingTimeout: number | null = null;
 
 export interface HookPayload {
   hook_event_name?: string;
@@ -26,6 +23,9 @@ export interface HookPayload {
   error?: string;
 
   tako_origin?: string;
+  user_prompt?: string;
+  last_assistant_message?: string;
+  tako_review?: ReviewPreview;
 }
 
 const MAX_ACTIVITY = 40;
@@ -111,66 +111,92 @@ function agentTarget(tool: string, input: Record<string, unknown>): string {
   return parts.length ? `${action} · ${parts.join(" → ")}` : action;
 }
 
-let agentTimeout: number | null = null;
+const MAX_SESSIONS = 6;
+const STALE_MS = 45 * 60_000;
+const DECISION_MS = 94_000;
+const CLICK_GUARD_MS = 700;
 
-function requestAgentApproval(island: Island, payload: HookPayload) {
-  const requestId = payload.request_id ?? "";
-  if (State.pendingApproval) {
-    void Bridge.approvalDecline(requestId);
+let approvalTimer: number | null = null;
+
+function prune() {
+  const now = Date.now();
+  for (const t of [...State.sessions]) {
+    const stale = t.state === "idle" && now - (t.lastEventAt ?? 0) > STALE_MS;
+    if (stale && t.id !== State.focusId) State.removeTask(t.id);
+  }
+  const live = [...State.sessions].sort((a, b) => (a.lastEventAt ?? 0) - (b.lastEventAt ?? 0));
+  while (live.length >= MAX_SESSIONS) {
+    const victim = live.find((t) => t.state === "idle") ?? live[0];
+    live.splice(live.indexOf(victim), 1);
+    State.removeTask(victim.id);
+  }
+}
+
+function sessionTask(payload: HookPayload): AgentTask {
+  const sid = payload.session_id || "default";
+  const cwd = payload.cwd ?? "";
+  const name = aliasProjectName(lastPathComponent(cwd) || "Session");
+  let task = State.sessionTask(sid);
+  if (!task) {
+    prune();
+    task = {
+      id: `session:${sid}`,
+      name,
+      color: colorForProject(name),
+      state: "idle",
+      stepIndex: 0,
+      steps: [],
+      source: "claudeCode",
+      isIntegration: false,
+      sessionId: sid,
+      sessionCwd: cwd || null,
+      activity: [],
+      prompt: null,
+      origin: payload.tako_origin || null,
+    };
+    State.tasks.unshift(task);
+  }
+  if (task.name !== name) {
+    task.name = name;
+    task.color = colorForProject(name);
+  }
+  if (cwd) task.sessionCwd = cwd;
+  if (payload.tako_origin) task.origin = payload.tako_origin;
+  task.lastEventAt = Date.now();
+  return task;
+}
+
+function claimFocus(task: AgentTask) {
+  const current = State.focusTask;
+  if (!current || current.id === task.id || !current.sessionId) {
+    State.focusId = task.id;
     return;
   }
-  State.pendingApproval = {
-    requestId,
-    sessionId: payload.session_id ?? "",
-    tool: payload.tool_name ?? "browser",
-    command: agentTarget(payload.tool_name ?? "", payload.tool_input ?? {}),
-    origin: "chat",
-  };
-  void Bridge.approvalAck(requestId);
-  State.isPinned = true;
-  Sound.play("approval");
-  island.alert("approval");
-  if (agentTimeout != null) window.clearTimeout(agentTimeout);
-  agentTimeout = window.setTimeout(() => {
-    agentTimeout = null;
-    if (State.pendingApproval?.requestId !== requestId) return;
-    State.pendingApproval = null;
-    State.isPinned = false;
-    island.dropPin();
-    if (State.view === "approval") island.setView("prompt");
-    State.notify();
-  }, 110_000);
-  State.notify();
+  const busy = current.state !== "idle" && current.state !== "finished";
+  const recent = Date.now() - (current.lastEventAt ?? 0) < 20_000;
+  if (!busy && !recent) State.focusId = task.id;
 }
 
-function upsert(projectName: string, cwd: string) {
-  const t = State.tasks.find((x) => x.id === CLAUDE_ID);
-  if (!t) return;
-  t.name = projectName;
-  if (cwd) t.sessionCwd = cwd;
+function isFocused(task: AgentTask): boolean {
+  return State.focusTask?.id === task.id;
 }
 
-function claudeTask() {
-  return State.tasks.find((x) => x.id === CLAUDE_ID);
+function startTurn(task: AgentTask, prompt: string | null) {
+  task.prompt = prompt;
+  task.activity = [];
+  task.turn = null;
+  task.finalMessage = null;
+  task.reviewAll = false;
 }
 
-function startTurn(prompt: string | null) {
-  const t = claudeTask();
-  if (!t) return;
-  t.prompt = prompt;
-  t.activity = [];
-}
-
-function startActivity(payload: HookPayload) {
-  const t = claudeTask();
-  if (!t) return;
-  const list = (t.activity ??= []);
+function startActivity(task: AgentTask, payload: HookPayload) {
+  const list = (task.activity ??= []);
   list.push(activityFromPre(payload.tool_name ?? "Tool", payload.tool_input ?? {}, payload.tool_use_id));
   if (list.length > MAX_ACTIVITY) list.splice(0, list.length - MAX_ACTIVITY);
 }
 
-function findActivity(payload: HookPayload): Activity | undefined {
-  const list = claudeTask()?.activity ?? [];
+function findActivity(task: AgentTask, payload: HookPayload): Activity | undefined {
+  const list = task.activity ?? [];
   if (payload.tool_use_id) {
     const byId = list.find((a) => a.id === payload.tool_use_id);
     if (byId) return byId;
@@ -183,7 +209,7 @@ function findActivity(payload: HookPayload): Activity | undefined {
 
 const loggedShapes = new Set<string>();
 
-function finishActivity(payload: HookPayload, failed: boolean) {
+function finishActivity(task: AgentTask, payload: HookPayload, failed: boolean) {
   const tool = payload.tool_name ?? "Tool";
   if (!loggedShapes.has(tool)) {
     loggedShapes.add(tool);
@@ -191,34 +217,152 @@ function finishActivity(payload: HookPayload, failed: boolean) {
     const keys = r && typeof r === "object" ? Object.keys(r).join(",") : typeof r;
     void Bridge.log(`result shape ${tool}: ${keys} id=${payload.tool_use_id ? "yes" : "no"}`);
   }
-  const a = findActivity(payload);
+  const a = findActivity(task, payload);
   if (a) applyPost(a, payload.tool_response, failed, payload.error);
 }
 
-function settleActivity() {
-  for (const a of claudeTask()?.activity ?? []) {
+function settleActivity(task: AgentTask) {
+  for (const a of task.activity ?? []) {
     if (a.status === "running") a.status = "done";
   }
 }
 
-function clearSession() {
-  const t = claudeTask();
-  if (!t) return;
-  t.activity = [];
-  t.prompt = null;
-  t.steps = [];
-  t.stepIndex = 0;
-  t.name = "VS Code";
-  t.pillBadge = null;
+function present(island: Island, info: ApprovalInfo) {
+  info.shownAt = Date.now();
+  State.pendingApproval = info;
+  State.isPinned = true;
+  const task = info.taskId ? State.tasks.find((t) => t.id === info.taskId) : undefined;
+  if (task) {
+    State.focusId = task.id;
+    task.pillBadge = null;
+    if (info.kind !== "agent") task.state = "approval";
+  }
+  Sound.play("approval");
+  island.alert(info.kind === "review" ? "review" : "approval");
+  if (approvalTimer != null) window.clearTimeout(approvalTimer);
+  approvalTimer = window.setTimeout(() => expire(island, info.requestId), Math.max(1000, info.expiresAt - Date.now()));
+  window.setTimeout(() => State.notify(), CLICK_GUARD_MS + 20);
+  State.notify();
+}
+
+function settleView(island: Island, done: ApprovalInfo) {
+  State.isPinned = false;
+  island.dropPin();
+  const open = State.view === "approval" || State.view === "review";
+  if (open) island.setView(done.origin === "chat" ? "prompt" : State.defaultView());
+}
+
+function advance(island: Island, done: ApprovalInfo) {
+  State.approvalQueue = State.approvalQueue.filter((i) => i.expiresAt - Date.now() > 3000);
+  const next = State.approvalQueue.shift();
+  if (next) present(island, next);
+  else settleView(island, done);
+  State.notify();
+}
+
+function expire(island: Island, requestId: string) {
+  const info = State.pendingApproval;
+  if (!info || info.requestId !== requestId) return;
+  State.pendingApproval = null;
+  const task = info.taskId ? State.tasks.find((t) => t.id === info.taskId) : undefined;
+  if (task && task.state === "approval") task.state = "working";
+  advance(island, info);
+}
+
+function request(island: Island, info: ApprovalInfo) {
+  if (info.requestId) void Bridge.approvalAck(info.requestId);
+  if (!State.pendingApproval) {
+    present(island, info);
+    return;
+  }
+  if (State.approvalQueue.length >= 6) {
+    if (info.kind === "review") void Bridge.approvalDecision(info.requestId, "deny");
+    else void Bridge.approvalDecline(info.requestId);
+    return;
+  }
+  State.approvalQueue.push(info);
+  const task = info.taskId ? State.tasks.find((t) => t.id === info.taskId) : undefined;
+  if (task) {
+    task.state = "approval";
+    task.pillBadge = "approval";
+  }
+  Sound.play("approval");
+  State.notify();
+}
+
+export function decideCurrent(island: Island, choice: "allow" | "deny" | "all") {
+  const req = State.pendingApproval;
+  if (!req) return;
+  if (choice !== "deny" && Date.now() - (req.shownAt ?? 0) < CLICK_GUARD_MS) {
+    void Bridge.log(`ignored a click ${Date.now() - (req.shownAt ?? 0)} ms after req=${req.requestId} appeared`);
+    return;
+  }
+  const word = choice === "deny" ? "deny" : "allow";
+  void Bridge.log(`decide ${choice} req=${req.requestId}`);
+  void Bridge.approvalDecision(req.requestId, word);
+  Sound.play(word === "deny" ? "blip" : "approve");
+  if (approvalTimer != null) window.clearTimeout(approvalTimer);
+  approvalTimer = null;
+  State.pendingApproval = null;
+  const task = req.taskId ? State.tasks.find((t) => t.id === req.taskId) : undefined;
+  if (task) {
+    task.state = "working";
+    task.pillBadge = null;
+    if (choice === "all") {
+      task.reviewAll = true;
+      State.approvalQueue = State.approvalQueue.filter((q) => {
+        if (q.kind !== "review" || q.taskId !== task.id) return true;
+        void Bridge.approvalDecision(q.requestId, "allow");
+        return false;
+      });
+    }
+  }
+  advance(island, req);
+}
+
+function reviewTarget(payload: HookPayload): string {
+  const input = payload.tool_input ?? {};
+  const raw = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : "";
+  return raw || payload.tool_name || "file";
+}
+
+function requestAgentApproval(island: Island, payload: HookPayload) {
+  const requestId = payload.request_id ?? "";
+  request(island, {
+    requestId,
+    sessionId: payload.session_id ?? "",
+    tool: payload.tool_name ?? "browser",
+    command: agentTarget(payload.tool_name ?? "", payload.tool_input ?? {}),
+    origin: "chat",
+    kind: "agent",
+    expiresAt: Date.now() + DECISION_MS,
+  });
 }
 
 export function registerHookHandlers(island: Island) {
   void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+  void onEvent<ContextInfo>("session-context", (info) => {
+    const task = State.sessionTask(info.sessionId);
+    if (!task) return;
+    task.context = { used: info.used, window: info.window, model: info.model };
+    State.notify();
+  });
+  void onEvent<TurnSummary>("session-turn", (summary) => {
+    const task = State.sessionTask(summary.sessionId);
+    if (!task) return;
+    task.turn = summary;
+    State.notify();
+  });
 }
 
 export function handleHook(island: Island, payload: HookPayload) {
   if (State.paused) {
-    if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
+    if (payload.request_id && payload.tako_review) {
+      void Bridge.approvalAck(payload.request_id);
+      void Bridge.approvalDecision(payload.request_id, "deny");
+    } else if (payload.request_id) {
+      void Bridge.approvalDecline(payload.request_id);
+    }
     return;
   }
 
@@ -232,10 +376,20 @@ export function handleHook(island: Island, payload: HookPayload) {
   }
 
   const name = payload.hook_event_name ?? "";
-  const cwd = payload.cwd ?? "";
-  const raw = lastPathComponent(cwd);
-  const projectName = aliasProjectName(raw || "Session");
-  const focused = State.focusId === CLAUDE_ID;
+  if (name === "SessionEnd") {
+    const ended = payload.session_id ? State.sessionTask(payload.session_id) : undefined;
+    if (ended) {
+      ended.state = "idle";
+      window.setTimeout(() => {
+        if (ended.state === "idle" && State.pendingApproval?.taskId !== ended.id) State.removeTask(ended.id);
+      }, 4000);
+    }
+    State.notify();
+    return;
+  }
+
+  const task = sessionTask(payload);
+  const focused = () => isFocused(task);
 
   const surface = (view: Parameters<Island["alert"]>[0], isAlert: boolean) => {
     if (State.mode === "expanded") {
@@ -249,131 +403,127 @@ export function handleHook(island: Island, payload: HookPayload) {
 
   switch (name) {
     case "SessionStart":
-      upsert(projectName, cwd);
+      claimFocus(task);
       surface("overview", false);
       Sound.play("work");
       break;
 
     case "UserPromptSubmit": {
-      upsert(projectName, cwd);
-      State.updateTask(CLAUDE_ID, "thinking");
-
-      const asked = payload.prompt ?? payload.message;
-      startTurn(asked?.trim() ? asked.trim().slice(0, 400) : null);
-      if (asked) State.appendStep(CLAUDE_ID, asked.slice(0, 60));
+      claimFocus(task);
+      task.state = "thinking";
+      task.pillBadge = null;
+      const asked = payload.prompt ?? payload.user_prompt ?? payload.message;
+      startTurn(task, asked?.trim() ? asked.trim().slice(0, 400) : null);
+      if (asked) State.appendStep(task.id, asked.slice(0, 60));
       surface("overview", false);
       break;
     }
 
     case "PreToolUse": {
-      upsert(projectName, cwd);
-      State.updateTask(CLAUDE_ID, "working");
+      if (task.state === "idle" || task.state === "finished") claimFocus(task);
+      task.state = "working";
       const tool = payload.tool_name ?? "Tool";
-      State.appendStep(CLAUDE_ID, stepLabel(tool, payload.tool_input ?? {}));
-      startActivity(payload);
-      surface("overview", false);
+      State.appendStep(task.id, stepLabel(tool, payload.tool_input ?? {}));
+      startActivity(task, payload);
+      if (payload.request_id && payload.tako_review) {
+        if (task.reviewAll) {
+          void Bridge.approvalAck(payload.request_id);
+          void Bridge.approvalDecision(payload.request_id, "allow");
+        } else {
+          request(island, {
+            requestId: payload.request_id,
+            sessionId: payload.session_id ?? "",
+            tool,
+            command: reviewTarget(payload),
+            origin: "session",
+            kind: "review",
+            taskId: task.id,
+            review: payload.tako_review,
+            expiresAt: Date.now() + DECISION_MS,
+          });
+        }
+      } else if (payload.request_id) {
+        void Bridge.approvalDecline(payload.request_id);
+      } else {
+        surface("overview", false);
+      }
       break;
     }
 
     case "PostToolUse":
-      State.updateTask(CLAUDE_ID, "working");
-      finishActivity(payload, false);
+      task.state = "working";
+      finishActivity(task, payload, false);
       break;
 
     case "PostToolUseFailure":
-      State.updateTask(CLAUDE_ID, "working");
-      State.appendStep(CLAUDE_ID, "⚠ failed");
-      finishActivity(payload, true);
+      task.state = "working";
+      State.appendStep(task.id, "⚠ failed");
+      finishActivity(task, payload, true);
       break;
 
     case "Notification": {
       const message = payload.message ?? "";
       const lower = message.toLowerCase();
       if (lower.includes("rate limit") || lower.includes("limite d")) {
-        State.updateTask(CLAUDE_ID, "ratelimit");
+        task.state = "ratelimit";
         Sound.play("rate");
       } else if (message.endsWith("?")) {
-        State.updateTask(CLAUDE_ID, "question");
-        State.appendStep(CLAUDE_ID, message);
+        task.state = "question";
+        State.appendStep(task.id, message);
       }
       break;
     }
 
-    case "Stop":
-      State.updateTask(CLAUDE_ID, "finished");
-      settleActivity();
-      if (payload.message) State.appendStep(CLAUDE_ID, payload.message.slice(0, 60));
+    case "Stop": {
+      task.state = "finished";
+      task.reviewAll = false;
+      settleActivity(task);
+      const final = (payload.last_assistant_message ?? payload.message ?? "").replace(/\s+/g, " ").trim();
+      task.finalMessage = final ? final.slice(0, 240) : null;
+      if (payload.message) State.appendStep(task.id, payload.message.slice(0, 60));
       Sound.play("finish");
 
-      const watching = State.mode === "expanded" && State.view === "session";
-      if (focused && State.settings.openOnFinish && !watching) surface("finished", true);
-      else if (!watching) State.setPillBadge(CLAUDE_ID, "finished");
+      const watching = State.mode === "expanded" && State.view === "session" && focused();
+      if (focused() && State.settings.openOnFinish && !watching) surface("finished", true);
+      else if (!focused()) task.pillBadge = "finished";
       window.setTimeout(() => {
-        State.updateTask(CLAUDE_ID, "idle");
-        State.setPillBadge(CLAUDE_ID, null);
+        if (task.state === "finished") task.state = "idle";
+        State.notify();
       }, 5200);
       break;
+    }
 
     case "StopFailure":
-      State.updateTask(CLAUDE_ID, "error");
+      task.state = "error";
       Sound.play("error");
-      if (focused) surface("error", true);
-      else State.setPillBadge(CLAUDE_ID, "error");
-      break;
-
-    case "SessionEnd":
-      State.updateTask(CLAUDE_ID, "idle");
-      clearSession();
+      if (focused()) surface("error", true);
+      else task.pillBadge = "error";
       break;
 
     case "SubagentStart":
-      State.appendStep(CLAUDE_ID, "+ subagent");
+      State.appendStep(task.id, "+ subagent");
       break;
 
     case "SubagentStop":
-      State.appendStep(CLAUDE_ID, "• subagent done");
+      State.appendStep(task.id, "• subagent done");
       break;
 
     case "PermissionRequest": {
       const requestId = payload.request_id ?? "";
-
-      if (State.pendingApproval && State.pendingApproval.requestId !== requestId) {
-        if (requestId) void Bridge.approvalDecline(requestId);
-        break;
-      }
-      upsert(projectName, cwd);
-      if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};
-      State.pendingApproval = {
+      if (!focused() && !State.pendingApproval) State.focusId = task.id;
+      request(island, {
         requestId,
         sessionId: payload.session_id ?? "",
         tool,
         command: approvalTarget(tool, input),
-      };
-
-      if (requestId) void Bridge.approvalAck(requestId);
-      State.updateTask(CLAUDE_ID, "approval");
-      State.isPinned = true;
-      Sound.play("approval");
-      if (focused) {
-        island.alert("approval");
-      } else {
-        State.setPillBadge(CLAUDE_ID, "approval");
-        island.reveal();
-      }
-
-      pendingTimeout = window.setTimeout(() => {
-        pendingTimeout = null;
-        if (!State.pendingApproval) return;
-        State.pendingApproval = null;
-        State.isPinned = false;
-        island.dropPin();
-        State.updateTask(CLAUDE_ID, "working");
-        State.setPillBadge(CLAUDE_ID, null);
-        if (State.view === "approval") island.setView(State.defaultView());
-        State.notify();
-      }, 110_000);
+        origin: "session",
+        kind: "permission",
+        taskId: task.id,
+        expiresAt: Date.now() + DECISION_MS,
+      });
+      if (!isFocused(task)) island.reveal();
       break;
     }
 

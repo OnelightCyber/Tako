@@ -7,7 +7,7 @@ import {
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { PLACEHOLDER_ID, State } from "../core/state";
 import { BotEngine, hexToRGB } from "../mascot/engine";
 import { Greeting } from "../mascot/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mascot/minibots";
@@ -16,6 +16,7 @@ import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
+import { decideCurrent } from "./hooks";
 
 const BOT_OVERHANG = 40;
 
@@ -41,6 +42,7 @@ export class Island {
   private botGlow!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
   private miniGrid!: HTMLElement;
+  private mediaStrip!: HTMLElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -119,30 +121,14 @@ export class Island {
           integration_notion: "https://notion.so",
           integration_calcom: "https://app.cal.com/bookings",
         };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
+        if (task.sessionId || task.id === PLACEHOLDER_ID) void Bridge.openInVSCode(task.sessionCwd ?? null);
         else if (task.id === "integration_n8n") void Bridge.openN8n();
         else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
       },
       openUrl: (url) => {
         if (url) void Bridge.openUrl(url);
       },
-      decide: (d) => {
-        const req = State.pendingApproval;
-        void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"}`);
-        if (!req) return;
-        Sound.play(d === "deny" ? "blip" : "approve");
-        void Bridge.approvalDecision(req.requestId, d);
-        State.pendingApproval = null;
-        State.isPinned = false;
-        this.fsm.pinned = false;
-        if (req.origin === "chat") {
-          this.setView("prompt");
-          return;
-        }
-        State.updateTask("integration_claude", "working");
-        State.setPillBadge("integration_claude", null);
-        this.setView(State.defaultView());
-      },
+      decide: (d) => decideCurrent(this, d),
       toggleSound: () => {
         State.settings.soundEnabled = !State.settings.soundEnabled;
         Sound.setEnabled(State.settings.soundEnabled);
@@ -170,6 +156,7 @@ export class Island {
     this.botCanvas = h("canvas", { id: "bot-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
     this.miniGrid = h("div", { id: "mini-grid" });
+    this.mediaStrip = h("div", { id: "media-strip" });
     this.countdown = h("div", { id: "countdown" });
 
     this.header = buildHeader(actions);
@@ -202,6 +189,7 @@ export class Island {
       this.botGlow,
       this.botCanvas,
       this.miniGrid,
+      this.mediaStrip,
       this.countdown,
     );
 
@@ -315,6 +303,11 @@ export class Island {
 
   reveal() {
     this.fsm.reveal();
+  }
+
+  openMission() {
+    State.isPinned = true;
+    this.alert("mission");
   }
 
   dropPin() {
@@ -647,7 +640,7 @@ export class Island {
   }
 
   private frame = (nowMs: number) => {
-    const dt = Math.min(0.05, (nowMs - this.lastFrame) / 1000);
+    const dt = Math.max(0, Math.min(0.05, (nowMs - this.lastFrame) / 1000));
     this.lastFrame = nowMs;
 
     this.width.step(dt, nowMs);
@@ -819,13 +812,29 @@ export class Island {
     }
 
     if (this.lastSyncedView !== State.view) {
-      const wasChat = this.lastSyncedView === "prompt";
+      const typing = (v: string | null | undefined) => v === "prompt" || v === "mission";
+      const wasTyping = typing(this.lastSyncedView);
       this.lastSyncedView = State.view;
-      if (State.view === "prompt") {
+      if (typing(State.view)) {
         void Bridge.focusWindow(true);
-        window.setTimeout(() => this.views.get("prompt")?.focus?.(), 120);
-      } else if (wasChat) {
+        const view = State.view;
+        window.setTimeout(() => this.views.get(view)?.focus?.(), 120);
+      } else if (wasTyping) {
         void Bridge.focusWindow(false);
+      }
+    }
+
+    const m = State.media;
+    const showStrip = State.mode === "compact" && State.settings.mediaEnabled && !!m?.active && !!m.playing;
+    this.mediaStrip.classList.toggle("on", showStrip);
+    if (showStrip && m) {
+      const key = `${m.title}~${m.art ? m.art.length : 0}`;
+      if (this.mediaStrip.dataset.key !== key) {
+        this.mediaStrip.dataset.key = key;
+        this.mediaStrip.replaceChildren();
+        const art = h("div", { class: "ms-art" });
+        if (m.art && m.art.startsWith("data:image/")) art.append(h("img", { src: m.art, alt: "" }));
+        this.mediaStrip.append(art, h("span", { class: "ms-title", text: m.title }), h("div", { class: "eq on" }, h("i"), h("i"), h("i")));
       }
     }
 

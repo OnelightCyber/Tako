@@ -69,6 +69,35 @@ one; click an older step to bring it back, click again to return to live.
 **The island fits its content**, like a Dynamic Island: a long diff or a long output makes it up to 30 % taller,
 wide lines of code make it wider, and it springs back once the content is short again.
 
+### Every session at once
+
+Each Claude Code terminal gets its own pill next to the character, with its project name. **Red and pulsing**: it's
+waiting for you. **Green**: it's done. Click a pill to bring its live view up; the session that needs you takes the
+stage on its own. A small ring shows **how full the context is** (read from the session's own transcript), so you
+know when it's time to `/compact`.
+
+### When Claude finishes
+
+A summary card: Claude's last words, the files changed with lines **+added −removed**, how long it took and how many
+tokens it used. Three buttons:
+
+- **Commit** — Claude writes the message, you edit it and confirm. Only the files of the turn, your git identity,
+  no trailers.
+- **See the diff** — the whole turn as one diff in VS Code.
+- **Undo** — every file goes back to how it was before the turn, except the ones you touched since. Before each
+  edit, Tako keeps a copy of the file on your PC for 3 days.
+
+### Review mode
+
+Optional: every file edit waits for your OK in the island, with the real diff and line numbers — **Approve**,
+**Reject**, or approve the rest of the turn. No answer: the edit isn't applied. Tako closed: Claude Code works as
+usual.
+
+### Missions
+
+`Alt+Shift+Space` from anywhere (or the rocket tab): type a task, pick the project, and Tako opens Claude Code on it
+in a new terminal — then you follow it live from the island.
+
 ### One-click permissions
 
 When Claude Code asks for a permission, the island opens with **Deny / Allow** (`N` / `Y`) and the exact command,
@@ -100,6 +129,15 @@ anywhere** — it snaps to the top edge and back next to the island — or pick 
 hides it. Type `/usage` in the chat for the same numbers as a card. They come from your own Claude Code's `/usage`,
 refreshed every 4 minutes.
 
+Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at this pace, plays a sound when your
+5-hour limit resets, and keeps a **history** in the settings: use per day, peak per week.
+
+### A real Dynamic Island
+
+- **Now playing**: Spotify, YouTube, Deezer… with the artwork, previous / play / next and a progress bar, and a mini
+  equalizer in the compact island.
+- **Your PC**: processor, memory and graphics card live, in a pill.
+
 ### And also
 
 - **File drops**: drop a file on the island and it lands in the chat. The hidden island wakes up when a file comes
@@ -119,6 +157,14 @@ refreshed every 4 minutes.
 <tr>
 <td width="50%"><img src="docs/screenshots/session-diff.png" alt="Numbered diff"><br><sub>An edit's diff with real line numbers</sub></td>
 <td width="50%"><img src="docs/screenshots/session-terminal.png" alt="Terminal"><br><sub>The command and the end of its output — the island grew to fit it</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/sessions.png" alt="Sessions"><br><sub>Three sessions, context ring, music and PC stats</sub></td>
+<td><img src="docs/screenshots/review.png" alt="Review"><br><sub>Review mode: the edit waits for your OK</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/finished.png" alt="Summary"><br><sub>The turn summary: Commit, diff, Undo</sub></td>
+<td><img src="docs/screenshots/music.png" alt="Music"><br><sub>What's playing, with the controls</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/session-read.png" alt="Read"><br><sub>A file being read, highlighted</sub></td>
@@ -243,6 +289,14 @@ exactly what happens here: everyone uses their own account, on their own machine
   Claude Code carries on. A relay run fits in 2 s, 110 s when a human has to answer.
 - **Silence means business as usual.** No answer to a permission: the terminal takes over.
 - **Agent actions fail closed.** No decision, no action.
+- **Review mode fails closed while Tako runs**: no answer in time, Tako paused, or too many edits at once — the edit
+  is rejected. It covers file edits, not commands. Tako closed: Claude Code applies its own permissions. A Tako
+  "allow" never overrides your `permissions.deny` rules.
+- **Clicks can't slip**: a permission or a review that just appeared ignores clicks for 0.7 s, so a double-click
+  never approves the next one.
+- **Undo copies stay on your PC**: before each edit, a copy of the file goes to `%LOCALAPPDATA%\Tako\snapshots` for
+  3 days (10 MB per file, 1 GB in total). Sensitive files — `.env`, keys, certificates, `.ssh`, `.aws`… — are never
+  copied, and their contents are never sent to Claude to write a commit message, nor committed by the Commit button.
 - **`settings.json` is never overwritten**: merge, diff shown, dated backup, written only after your click and only
   if the file hasn't changed since the diff.
 - **No permission is granted without an explicit click.**
@@ -250,10 +304,11 @@ exactly what happens here: everyone uses their own account, on their own machine
   a key exists.
 - **No telemetry.** Network requests only go to the services you set up, and to Claude through your own Claude Code.
 - **Nothing is injected as HTML**: code from your files is built node by node, never through `innerHTML`.
-- **0 % CPU while hidden**: animations and the cursor poll stop; only 8 Win32 reads per second watch for a file being
-  dragged towards the hidden island.
+- **0 % CPU while hidden**: animations, the cursor poll, music and PC stats stop; only 8 Win32 reads per second watch
+  for a file being dragged towards the hidden island.
 - **The relay checks who it talks to**: the named pipe is bound to your Windows account (SID) and the server is
-  verified before anything is sent.
+  verified before anything is sent. Programs running under your own account are trusted, like everything else they
+  can already do as you.
 
 ---
 
@@ -302,8 +357,11 @@ npm run dev             # just the interface, in a browser
 - **File drop demo**: <http://127.0.0.1:1420/dev/upload-preview.html>.
 - **Usage demo**: <http://127.0.0.1:1420/?demo=usage> (the `/usage` card) and
   <http://127.0.0.1:1420/usage.html?open> (the widget).
+- **New views**: <http://127.0.0.1:1420/?feature=overview> (also `review`, `finished`, `music`, `system`,
+  `mission`, `usage`).
 - **Tests**: `cargo test -p tako-hook --release` (relay, agent guard, MCP server) and `cargo test -p tako --lib`
-  (hooks, files, settings, `/usage` parsing, widget placement).
+  (hooks, files, sessions, undo and commit on a real repository, `/usage` forecasts and alerts, widget placement,
+  media, PC stats).
 - **Icons**: `npm run icons` redraws `src-tauri/icons` from `scripts/gen-icons.mjs`.
 - **Log**: `%LOCALAPPDATA%\Tako\tako.log` — hook events, decisions, tool result shapes (keys only), drags, browser,
   chat errors. It stays on your machine.
@@ -328,8 +386,11 @@ src/                      island front end (TypeScript, no framework)
   usage/                  the usage widget
 src-tauri/src/            Rust backend
   claude_cli.rs           chat through the user's Claude Code
-  usage.rs                Claude Code's /usage, read and cached
+  usage.rs                Claude Code's /usage, history, forecast, alerts
   widget.rs               the widget window: spots, drag, snap
+  sessions.rs             context, turn summary, undo, commit, diff, missions
+  media.rs                what's playing (Windows media sessions)
+  sysstats.rs             CPU, memory, GPU
   browser.rs              the agent's persistent Playwright server
   updater.rs              signed updates from GitHub releases
   pipe.rs                 named pipe, permissions, agent actions
@@ -337,6 +398,8 @@ src-tauri/src/            Rust backend
   island.rs               window, click-through, cursor, file drops
 hook/src/                 tako-hook.exe
   main.rs                 the hook relay
+  snapshot.rs             a copy of each file before Claude edits it
+  review.rs               the diff shown in review mode
   mcp.rs, screen.rs       the screenshot MCP server
 sounds/                   Tako's 28 sounds
 dev/                      demos and the banner (never shipped)
@@ -356,9 +419,11 @@ docs/                     banner, GIF and screenshots
 - [x] Full settings, integration logos, signed auto-updates
 - [x] Tako's own character, icon and sounds
 - [x] **Usage widget**: the 5-hour and weekly limits on screen, draggable, and `/usage` in the chat
+- [x] **Multi-session** with a pill per terminal and a context ring
+- [x] **Turn summary** with Commit, diff and Undo, and an optional **review mode**
+- [x] **Missions** from a global shortcut
+- [x] Limit alerts, forecast and history; music; PC stats
 - [ ] English settings window
-- [ ] **Multi-session**: one pill per Claude Code terminal
-- [ ] **Missions**: start a full Claude Code task from the island
 - [ ] **Game mode**: nothing opens over a full-screen game
 - [ ] **Server monitoring**: up / down, CPU, RAM, disk, containers
 - [ ] **Session guardrails**: block dangerous commands, flag access to secrets

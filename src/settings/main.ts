@@ -1,5 +1,5 @@
 import "./settings.css";
-import { Bridge, onEvent, type HookStatus, type UsageReport } from "../core/bridge";
+import { Bridge, onEvent, type HookStatus, type UsageSample } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
@@ -7,9 +7,9 @@ import { proIcon, type ProIconName } from "../views/pro-icons";
 import { brandLogo } from "../views/brand-logos";
 import { blob } from "./blob";
 import { closeDropdowns, dropdown, type Choice } from "./dropdown";
-import { countdown, fetchUsage, longLabel, tone, usageError } from "../usage/gauge";
+import { countdown, fetchHistory, fetchUsage, longLabel, resetDate, tone, usageError } from "../usage/gauge";
 
-type PageId = "home" | "claude" | "chat" | "integrations" | "island" | "about";
+type PageId = "home" | "claude" | "chat" | "integrations" | "island" | "usage" | "about";
 
 interface Ctx {
   settings: Settings;
@@ -28,6 +28,7 @@ const PAGES: { id: PageId; label: string; icon: ProIconName }[] = [
   { id: "chat", label: "Chat & agent", icon: "chat" },
   { id: "integrations", label: "Intégrations", icon: "plug" },
   { id: "island", label: "Îlot & sons", icon: "sliders" },
+  { id: "usage", label: "Utilisation", icon: "gauge" },
   { id: "about", label: "À propos", icon: "info" },
 ];
 
@@ -203,6 +204,7 @@ function buildPage(id: PageId): Node[] {
     case "chat": return chatPage();
     case "integrations": return integrationsPage();
     case "island": return islandPage();
+    case "usage": return usagePage();
     case "about": return aboutPage();
   }
 }
@@ -289,7 +291,11 @@ function claudePage(): Node[] {
     if (!ctx.hooks.hookReady) {
       hookCard.append(h("div", { class: "notice warn", text: "tako-hook.exe n'est pas encore en place. Relance Tako ; si ça persiste, compile-le avec cargo build -p tako-hook." }));
     }
-    const install = button(ctx.hooks.installed ? "Réinstaller…" : "Installer les hooks…", "primary", () => void preview(true), "bolt");
+    const outdated = ctx.hooks.installed && !ctx.hooks.upToDate;
+    if (outdated) {
+      hookCard.append(h("div", { class: "notice warn", text: "Les hooks de Tako ont évolué (relecture des modifs, délais plus longs). Mets-les à jour pour en profiter." }));
+    }
+    const install = button(outdated ? "Mettre à jour…" : ctx.hooks.installed ? "Réinstaller…" : "Installer les hooks…", "primary", () => void preview(true), "bolt");
     if (!ctx.hooks.hookReady) install.setAttribute("disabled", "");
     const actions = h("div", { class: "actions" }, install);
     if (ctx.hooks.installed) actions.append(button("Désinstaller…", "danger", () => void preview(false), "x"));
@@ -342,8 +348,43 @@ function claudePage(): Node[] {
 
   const behaviour = card(
     cardHead("Comportement", undefined, "sliders"),
-    row("Ouvrir l'îlot quand Claude a fini", "Sinon une simple pastille verte, sans rien ouvrir — idéal en jeu.",
+    row("Ouvrir l'îlot quand Claude a fini", "Avec le bilan : fichiers, lignes, tokens, et les boutons Commit, Diff et Annuler. Sinon une simple pastille verte.",
       toggle(ctx.settings.openOnFinish, (v) => { ctx.settings.openOnFinish = v; void save(); }), "eye"),
+    row("Annuler un tour", "Avant chaque modification, Tako garde une copie du fichier pendant 3 jours, sur ton PC uniquement (1 Go maximum). Le bouton Annuler remet tout comme avant le tour, sauf les fichiers retouchés depuis. Les fichiers sensibles (.env, clés, .ssh…) ne sont jamais copiés ni envoyés pour le message de commit.",
+      h("span", { class: "muted small", text: "Toujours actif" }), "undo"),
+  );
+
+  const reviewReady = ctx.hooks.installed && ctx.hooks.upToDate;
+  const review = card(
+    cardHead("Mode relecture", pill(ctx.settings.reviewMode ? (reviewReady ? true : "warn") : false, ctx.settings.reviewMode ? "Actif" : "Désactivé"), "review"),
+    h("p", { class: "muted", text: "Chaque modification de fichier par Claude attend ton OK dans l'îlot, diff affiché, avant d'être écrite : valider, refuser, ou tout valider pour le tour. Pas de réponse, Tako en pause ou trop de modifs d'un coup : la modif est refusée. Ça concerne les fichiers, pas les commandes. Si Tako est fermé, Claude Code applique ses propres permissions." }),
+    row("Relire chaque modification", reviewReady ? null : "Mets d'abord les hooks à jour (carte au-dessus).",
+      toggle(ctx.settings.reviewMode, (v) => { ctx.settings.reviewMode = v; void save(v ? "Relecture activée" : "Relecture désactivée"); }, !reviewReady && !ctx.settings.reviewMode), "eye"),
+  );
+
+  const HOTKEYS = [
+    { value: "Alt+Shift+Space", label: "Alt + Maj + Espace" },
+    { value: "Ctrl+Shift+Space", label: "Ctrl + Maj + Espace" },
+    { value: "Alt+Shift+T", label: "Alt + Maj + T" },
+    { value: "Ctrl+Alt+Space", label: "Ctrl + Alt + Espace" },
+    { value: "off", label: "Désactivé" },
+  ];
+  const hotkeyNote = h("div", { class: "notice warn", style: "display:none" });
+  const checkHotkey = async () => {
+    const err = await Bridge.hotkeyStatus();
+    hotkeyNote.textContent = err ? `Ce raccourci est déjà pris par une autre application. Choisis-en un autre.` : "";
+    hotkeyNote.style.display = err ? "" : "none";
+  };
+  void checkHotkey();
+  const hotkey = dropdown(HOTKEYS, ctx.settings.missionHotkey || "Alt+Shift+Space", (v) => {
+    ctx.settings.missionHotkey = v;
+    void save("Raccourci enregistré").then(() => window.setTimeout(() => void checkHotkey(), 300));
+  });
+  const missions = card(
+    cardHead("Missions", undefined, "rocket"),
+    h("p", { class: "muted", text: "Tape une tâche dans l'îlot : Tako ouvre Claude Code dans le projet choisi, dans un nouveau terminal, et tu suis tout en live." }),
+    row("Raccourci global", "Ouvre « Nouvelle mission » depuis n'importe où. Aussi dans l'onglet fusée de l'îlot.", hotkey, "bolt"),
+    hotkeyNote,
   );
 
   const binary = card(
@@ -355,7 +396,7 @@ function claudePage(): Node[] {
       : h("p", { class: "muted", text: "Installe Claude Code (npm i -g @anthropic-ai/claude-code) puis relance Tako." }),
   );
 
-  return [pageHeader("Claude Code", "Ce qui relie Tako à tes sessions."), hookCard, behaviour, binary];
+  return [pageHeader("Claude Code", "Ce qui relie Tako à tes sessions."), hookCard, review, missions, behaviour, binary];
 }
 
 function chatPage(): Node[] {
@@ -577,7 +618,13 @@ function islandPage(): Node[] {
       row("Afficher sur", null, screen, "monitor"),
       row("Lancer au démarrage de Windows", null, toggle(ctx.settings.autostart, (v) => { ctx.settings.autostart = v; void save(); }), "bolt"),
     ),
-    usageWidgetCard(),
+    card(
+      cardHead("Pastilles", undefined, "layers"),
+      row("Musique en cours", "Spotify, YouTube, Deezer… avec la pochette et les boutons lecture / suivant, et un mini égaliseur dans l'îlot replié.",
+        toggle(ctx.settings.mediaEnabled, (v) => { ctx.settings.mediaEnabled = v; void save(); }), "music"),
+      row("Stats du PC", "Processeur, mémoire et carte graphique en direct.",
+        toggle(ctx.settings.statsEnabled, (v) => { ctx.settings.statsEnabled = v; void save(); }), "cpu"),
+    ),
   ];
 }
 
@@ -595,23 +642,6 @@ function usageKey(): string {
 }
 
 function usageWidgetCard(): HTMLElement {
-  const preview = h("div", { class: "usage-preview" }, h("span", { class: "muted small", text: "Lecture de /usage…" }));
-  const fill = (r: UsageReport | null) => {
-    clear(preview);
-    if (!r || r.lines.length === 0) {
-      preview.append(h("span", { class: "muted small", text: r ? usageError(r.error) : "Disponible dans l'app Tako." }));
-      return;
-    }
-    for (const line of r.lines) {
-      preview.append(
-        h("div", { class: "up-row" },
-          h("div", { class: "up-top" }, h("span", { text: longLabel(line.label) }), h("b", { text: `${line.percent} %` })),
-          h("div", { class: "up-bar" }, h("i", { style: `width:${line.percent}%;background:${tone(line.percent)}` })),
-          line.resets ? h("div", { class: "up-sub", text: `Reset dans ${countdown(line.resets)}` }) : null),
-      );
-    }
-  };
-  void fetchUsage(false).then(fill);
 
   const spots = h("div", { class: "spots" });
   for (const [id, label] of USAGE_SPOTS) {
@@ -640,9 +670,160 @@ function usageWidgetCard(): HTMLElement {
       h("div", { class: "row-title", text: "Position" }),
       spots,
       h("p", { class: "muted small", text: "Ou attrape le widget et glisse-le où tu veux. Clic droit dessus pour le masquer." })),
-    preview,
   );
   return usageCardEl;
+}
+
+function dayKey(t: number): string {
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dailyUse(samples: UsageSample[]): { label: string; title: string; value: number }[] {
+  const sorted = [...samples].sort((a, b) => a.t - b.t);
+  const totals = new Map<string, number>();
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    if (a.week == null || b.week == null || a.weekResets !== b.weekResets) continue;
+    const delta = b.week - a.week;
+    if (delta > 0) totals.set(dayKey(b.t), (totals.get(dayKey(b.t)) ?? 0) + delta);
+  }
+  const out = [];
+  const days = ["D", "L", "M", "M", "J", "V", "S"];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const value = totals.get(dayKey(d.getTime() / 1000)) ?? 0;
+    out.push({ label: days[d.getDay()], title: `${d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" })} : ${value} % de la semaine`, value });
+  }
+  return out;
+}
+
+function weeklyPeaks(samples: UsageSample[]): { label: string; title: string; value: number }[] {
+  const peaks = new Map<string, { value: number; t: number }>();
+  for (const s of samples) {
+    if (s.week == null || !s.weekResets) continue;
+    const cur = peaks.get(s.weekResets);
+    if (!cur || s.week > cur.value) peaks.set(s.weekResets, { value: s.week, t: s.t });
+    else cur.t = Math.max(cur.t, s.t);
+  }
+  return [...peaks.entries()]
+    .sort((a, b) => a[1].t - b[1].t)
+    .slice(-8)
+    .map(([resets, p]) => {
+      const date = resetDate(resets);
+      const label = date ? date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) : "—";
+      return { label, title: `Semaine finissant le ${label} : ${p.value} %`, value: p.value };
+    });
+}
+
+function barChart(bars: { label: string; title: string; value: number }[], max: number): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const W = 560;
+  const H = 120;
+  const pad = 18;
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "chart");
+  const slot = W / Math.max(1, bars.length);
+  const bw = Math.min(26, slot * 0.6);
+  const top = Math.max(max, ...bars.map((b) => b.value), 1);
+  bars.forEach((b, i) => {
+    const x = i * slot + (slot - bw) / 2;
+    const hgt = Math.max(b.value > 0 ? 3 : 1.5, ((H - pad - 8) * b.value) / top);
+    const rect = document.createElementNS(ns, "rect");
+    rect.setAttribute("x", x.toFixed(1));
+    rect.setAttribute("y", (H - pad - hgt).toFixed(1));
+    rect.setAttribute("width", bw.toFixed(1));
+    rect.setAttribute("height", hgt.toFixed(1));
+    rect.setAttribute("rx", "4");
+    rect.setAttribute("fill", b.value > 0 ? tone(b.value) : "rgba(255,255,255,0.08)");
+    rect.style.animationDelay = `${i * 25}ms`;
+    const tip = document.createElementNS(ns, "title");
+    tip.textContent = b.title;
+    rect.append(tip);
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", (x + bw / 2).toFixed(1));
+    text.setAttribute("y", String(H - 4));
+    text.setAttribute("text-anchor", "middle");
+    text.textContent = b.label;
+    svg.append(rect, text);
+    if (b.value > 0) {
+      const v = document.createElementNS(ns, "text");
+      v.setAttribute("x", (x + bw / 2).toFixed(1));
+      v.setAttribute("y", (H - pad - hgt - 4).toFixed(1));
+      v.setAttribute("text-anchor", "middle");
+      v.setAttribute("class", "v");
+      v.textContent = `${b.value}`;
+      svg.append(v);
+    }
+  });
+  return svg;
+}
+
+function usagePage(): Node[] {
+  const now = h("div", { class: "usage-preview first" }, h("span", { class: "muted small", text: "Lecture de /usage…" }));
+  const forecast = h("p", { class: "muted small forecast" });
+  void fetchUsage(false).then((r) => {
+    clear(now);
+    if (!r || r.lines.length === 0) {
+      now.append(h("span", { class: "muted small", text: r ? usageError(r.error) : "Disponible dans l'app Tako." }));
+      return;
+    }
+    for (const line of r.lines) {
+      now.append(
+        h("div", { class: "up-row" },
+          h("div", { class: "up-top" }, h("span", { text: longLabel(line.label) }), h("b", { text: `${line.percent} %` })),
+          h("div", { class: "up-bar" }, h("i", { style: `width:${line.percent}%;background:${tone(line.percent)}` })),
+          line.resets ? h("div", { class: "up-sub", text: `Reset dans ${countdown(line.resets)}` }) : null),
+      );
+    }
+    const session = r.lines.find((l) => l.label.toLowerCase().includes("session"));
+    const reset = session ? resetDate(session.resets) : null;
+    if (r.forecastAt && (!reset || r.forecastAt * 1000 < reset.getTime())) {
+      const at = new Date(r.forecastAt * 1000);
+      forecast.textContent = `À ce rythme, ta session de 5 h sera pleine vers ${at.getHours()} h ${String(at.getMinutes()).padStart(2, "0")}.`;
+    } else if (session) {
+      forecast.textContent = "À ce rythme, tu n'atteindras pas la limite avant le reset.";
+    }
+  });
+
+  const daily = h("div", { class: "chart-box" }, h("span", { class: "muted small", text: "Chargement…" }));
+  const weekly = h("div", { class: "chart-box" });
+  void fetchHistory().then((samples) => {
+    clear(daily);
+    clear(weekly);
+    const list = samples ?? [];
+    if (list.length < 2) {
+      daily.append(h("p", { class: "muted small", text: "Les données s'accumulent : Tako relève tes limites toutes les 4 minutes. Reviens dans quelques heures." }));
+      return;
+    }
+    daily.append(barChart(dailyUse(list), 10));
+    const peaks = weeklyPeaks(list);
+    if (peaks.length) weekly.append(barChart(peaks, 100));
+  });
+
+  return [
+    pageHeader("Utilisation", "Tes limites Claude, en direct et dans le temps."),
+    card(cardHead("Maintenant", undefined, "gauge"), now, forecast),
+    card(
+      cardHead("Alertes", undefined, "bolt"),
+      row("Me prévenir à 80 % et 90 %", "Pour la session de 5 h et la semaine, avec l'heure à laquelle tu atteindras la limite à ce rythme.",
+        toggle(ctx.settings.usageAlerts, (v) => { ctx.settings.usageAlerts = v; void save(); }), "eye"),
+      row("Son quand la session est rechargée", "Un petit son quand ta limite de 5 h repart de zéro.",
+        toggle(ctx.settings.usageRecharge, (v) => { ctx.settings.usageRecharge = v; void save(); }), "volume"),
+    ),
+    usageWidgetCard(),
+    card(
+      cardHead("Historique", undefined, "layers"),
+      h("div", { class: "row-title", text: "Consommation par jour (en % de la semaine)" }),
+      daily,
+      h("div", { class: "row-title", text: "Pic de chaque semaine" }),
+      weekly,
+    ),
+  ];
 }
 
 function updatesCard(): HTMLElement {
@@ -731,7 +912,7 @@ function aboutPage(): Node[] {
 async function main() {
   void Sound.preload();
   const boot = await Bridge.boot();
-  const hooks = (await Bridge.hooksStatus()) ?? { installed: false, settingsPath: "", hookPath: "", hookReady: false };
+  const hooks = (await Bridge.hooksStatus()) ?? { installed: false, upToDate: false, settingsPath: "", hookPath: "", hookReady: false };
   const cc = (await Bridge.claudeCodeInfo()) ?? { found: false, path: "", version: "" };
   const hasKey = (await Bridge.secretPresent("anthropic-api-key")) ?? false;
   const present: Record<string, boolean> = {};
@@ -748,7 +929,7 @@ async function main() {
   };
   if (import.meta.env.DEV && location.search.includes("demo")) {
     ctx.version = "0.1.1";
-    ctx.hooks = { installed: true, hookReady: true, settingsPath: String.raw`C:\Users\dev\.claude\settings.json`, hookPath: String.raw`C:\Users\dev\AppData\Local\Tako\bin\tako-hook.exe` };
+    ctx.hooks = { installed: true, upToDate: true, hookReady: true, settingsPath: String.raw`C:\Users\dev\.claude\settings.json`, hookPath: String.raw`C:\Users\dev\AppData\Local\Tako\bin\tako-hook.exe` };
     ctx.cc = { found: true, path: String.raw`C:\Users\dev\.local\bin\claude.exe`, version: "2.1.286 (Claude Code)" };
     ctx.settings.chatAgent = true;
     ctx.settings.activeIntegrations = ["integration_github", "integration_vercel", "integration_stripe"];

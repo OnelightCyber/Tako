@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::island::WINDOW_LABEL;
 use crate::log;
 
-const DECISION_TIMEOUT: Duration = Duration::from_secs(108);
+const DECISION_TIMEOUT: Duration = Duration::from_secs(96);
 
 const ACK_TIMEOUT: Duration = Duration::from_millis(800);
 const MAX_PAYLOAD: usize = 1 << 20;
@@ -97,6 +97,14 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
         .unwrap_or_default()
         .to_string();
 
+    let transcript = payload
+        .as_object_mut()
+        .and_then(|m| m.remove("transcript_path"))
+        .and_then(|v| v.as_str().map(std::path::PathBuf::from));
+    if let Some(path) = transcript {
+        crate::sessions::observe(&app, &event, &payload, path);
+    }
+
     let awaits = event == "PermissionRequest"
         || payload.get("await_decision").and_then(Value::as_bool).unwrap_or(false);
     if !awaits {
@@ -136,11 +144,11 @@ async fn wait_for_decision(id: &str, rx: &mut mpsc::Receiver<Reply>) -> Option<S
         }
         Ok(Some(Reply::Decline)) => {
             log::line(format!("hook id={id} not shown — terminal takes over"));
-            return None;
+            return Some("pass".into());
         }
         Ok(None) => return None,
         Err(_) => {
-            log::line(format!("hook id={id} island never acknowledged — terminal takes over"));
+            log::line(format!("hook id={id} island never acknowledged"));
             return None;
         }
     }
@@ -152,7 +160,7 @@ async fn wait_for_decision(id: &str, rx: &mut mpsc::Receiver<Reply>) -> Option<S
         }
         Ok(Some(Reply::Decline)) => {
             log::line(format!("hook id={id} released without a decision"));
-            None
+            Some("pass".into())
         }
         _ => {
             log::line(format!("hook id={id} timed out — terminal takes over"));

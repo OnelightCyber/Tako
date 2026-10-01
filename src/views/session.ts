@@ -234,7 +234,7 @@ function setHead(p: PanelParts, badge: string | { icon: ProIconName }, color: st
   p.headPath.title = path;
 }
 
-function renderDiff(body: HTMLElement, lines: DiffLine[], numbered: boolean, ext: string, typing: boolean) {
+export function renderDiff(body: HTMLElement, lines: DiffLine[], numbered: boolean, ext: string, typing: boolean) {
   const table = h("div", { class: "code-rows" });
   let firstChange = -1;
   let typed = 0;

@@ -168,7 +168,8 @@ function typingDots(status: string): HTMLElement {
 }
 
 function chatCwd(): string | null {
-  return State.tasks.find((t) => t.id === "integration_claude")?.sessionCwd ?? null;
+  const recent = [...State.sessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
+  return recent?.sessionCwd ?? null;
 }
 
 function contextChip(label: string): HTMLElement {

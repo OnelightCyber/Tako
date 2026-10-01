@@ -1,4 +1,4 @@
-import { Bridge, IS_TAURI, type UsageLine, type UsageReport } from "../core/bridge";
+import { Bridge, IS_TAURI, type UsageLine, type UsageReport, type UsageSample } from "../core/bridge";
 
 const MONTHS: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
@@ -97,6 +97,15 @@ export async function fetchUsage(force: boolean): Promise<UsageReport | null> {
     return demoUsage();
   }
   return report;
+}
+
+export async function fetchHistory(): Promise<UsageSample[] | null> {
+  const history = await Bridge.usageHistory();
+  if (!history && !IS_TAURI && import.meta.env.DEV) {
+    const { demoHistory } = await import("../../dev/usage-demo");
+    return demoHistory();
+  }
+  return history;
 }
 
 export function usageError(error: string | null | undefined): string {

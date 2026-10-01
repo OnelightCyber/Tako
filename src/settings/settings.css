@@ -1315,3 +1315,45 @@ kbd {
 .dd-item.selected .dd-check {
   opacity: 1;
 }
+
+.usage-preview.first {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.forecast:empty {
+  display: none;
+}
+
+.chart-box {
+  padding: 4px 0 6px;
+}
+
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.chart rect {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: bar-in 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+@keyframes bar-in {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+.chart text {
+  fill: var(--dim-2);
+  font: 500 10px var(--font);
+}
+
+.chart text.v {
+  fill: var(--ink-2);
+  font: 700 9.5px var(--mono);
+}

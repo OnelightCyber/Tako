@@ -1,11 +1,13 @@
 import "./style.css";
 import "./session.css";
+import "./extra.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
+import { registerExtras } from "./island/extras";
 
 async function main() {
   const root = document.getElementById("root");
@@ -65,13 +67,18 @@ async function main() {
   });
 
   registerHookHandlers(island);
+  registerExtras(island);
   registerIntegrationHandlers(island);
 
   island.launch();
 
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
-    if (import.meta.env.DEV && location.search.includes("demo=usage")) {
+    const feature = new URLSearchParams(location.search).get("feature");
+    if (import.meta.env.DEV && feature) {
+      const { runFeatureDemo } = await import("../dev/features-demo");
+      runFeatureDemo(island, feature);
+    } else if (import.meta.env.DEV && location.search.includes("demo=usage")) {
       const { runUsageDemo } = await import("../dev/usage-demo");
       runUsageDemo(island);
     } else if (import.meta.env.DEV && location.search.includes("demo")) {

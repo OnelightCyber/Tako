@@ -71,6 +71,16 @@ export const Bridge = {
   showIsland: () => call<void>("show_island"),
   usageGet: (force: boolean) => call<UsageReport>("usage_get", { force }),
   usageResize: (width: number, height: number) => call<void>("usage_resize", { width, height }),
+  usageHistory: () => call<UsageSample[]>("usage_history"),
+  sessionSummary: (sessionId: string, cwd: string) => call<TurnSummary | null>("session_summary", { sessionId, cwd }),
+  sessionUndo: (sessionId: string) => callOrThrow<UndoReport>("session_undo", { sessionId }),
+  sessionDiff: (sessionId: string, project: string) => callOrThrow<void>("session_diff", { sessionId, project }),
+  sessionCommitMessage: (sessionId: string, cwd: string) => callOrThrow<string>("session_commit_message", { sessionId, cwd }),
+  sessionCommit: (sessionId: string, cwd: string, message: string) => callOrThrow<string>("session_commit", { sessionId, cwd, message }),
+  missionStart: (task: string, cwd: string) => callOrThrow<void>("mission_start", { task, cwd }),
+  pickFolder: () => call<string | null>("pick_folder"),
+  hotkeyStatus: () => call<string | null>("hotkey_status"),
+  mediaControl: (action: "toggle" | "next" | "previous") => call<void>("media_control", { action }),
   usageDrag: () => call<void>("usage_drag"),
   usageClose: () => call<void>("usage_close"),
   updateCheck: () => callOrThrow<{ version: string; current: string; notes: string } | null>("update_check"),
@@ -122,10 +132,80 @@ export interface UsageReport {
   subscription: boolean;
   fetchedAt: number;
   error?: string | null;
+  forecastAt?: number | null;
+}
+
+export interface UsageSample {
+  t: number;
+  session: number | null;
+  week: number | null;
+  sessionResets: string;
+  weekResets: string;
+}
+
+export interface UsageAlert {
+  kind: "session" | "week";
+  percent: number;
+  threshold: number;
+  resets: string;
+  forecastAt: number | null;
+}
+
+export interface ContextInfo {
+  sessionId: string;
+  used: number;
+  window: number;
+  model: string;
+}
+
+export interface FileChange {
+  path: string;
+  added: number;
+  removed: number;
+  created: boolean;
+  skipped: boolean;
+}
+
+export interface TurnSummary {
+  sessionId: string;
+  files: FileChange[];
+  added: number;
+  removed: number;
+  durationMs: number;
+  tokens: number;
+  outputTokens: number;
+  git: boolean;
+  undone: boolean;
+}
+
+export interface UndoReport {
+  restored: string[];
+  skipped: string[];
+}
+
+export interface Track {
+  active: boolean;
+  title: string;
+  artist: string;
+  app: string;
+  playing: boolean;
+  positionMs: number;
+  durationMs: number;
+  atMs: number;
+  art: string | null;
+}
+
+export interface SystemStats {
+  cpu: number;
+  ram: number;
+  ramUsedGb: number;
+  ramTotalGb: number;
+  gpu: number | null;
 }
 
 export interface HookStatus {
   installed: boolean;
+  upToDate: boolean;
   settingsPath: string;
   hookPath: string;
   hookReady: boolean;

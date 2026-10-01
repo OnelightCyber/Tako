@@ -29,7 +29,7 @@ function makeRow(): Row {
   const shimmer = h("span", { class: "tick-text shimmer" });
   const dim = h("span", {
     class: "tick-text",
-    style: "position:absolute;left:0;right:0;color:#6b7079",
+    style: "position:absolute;left:0;right:0;top:0;color:#6b7079",
   });
   const el = h(
     "div",
@@ -57,6 +57,18 @@ function place(row: Row, y: number, phase: number, opacity: number) {
   row.dim.style.opacity = String(clamp(phase * 2 - 0.4, 0, 1));
 }
 
+export function appended(before: string[], after: string[]): number {
+  if (before.length === after.length && before.every((s, i) => s === after[i])) return 0;
+  for (let n = 1; n <= after.length; n++) {
+    const drop = before.length + n - after.length;
+    if (drop < 0 || drop > before.length) continue;
+    const kept = before.slice(drop);
+    if (kept.length === 0 && before.length > 0) continue;
+    if (kept.every((s, i) => s === after[i])) return n;
+  }
+  return -1;
+}
+
 export class Ticker {
   readonly el: HTMLElement;
   private a = makeRow();
@@ -64,7 +76,7 @@ export class Ticker {
   private c = makeRow();
   private queue: string[] = [];
   private startMs: number | null = null;
-  private displayIndex = -1;
+  private shown: string[] | null = null;
 
   constructor() {
     this.el = h("div", { class: "ticker" }, this.a.el, this.b.el, this.c.el);
@@ -82,29 +94,21 @@ export class Ticker {
   }
 
   sync(task: AgentTask | null) {
-    const steps = task && task.steps.length > 0 ? task.steps : ["…"];
-    const idx = task ? Math.min(task.stepIndex, steps.length - 1) : -1;
+    const idle = task?.prompt ? task.prompt.replace(/\s+/g, " ").slice(0, 70) : "En attente de Claude…";
+    const steps = task && task.steps.length > 0 ? task.steps : [idle];
+    const added = this.shown ? appended(this.shown, steps) : -1;
+    this.shown = [...steps];
 
-    if (this.displayIndex < 0) {
-      this.displayIndex = idx;
-      setText(this.a, idx > 0 ? steps[idx - 1] : "…");
-      setText(this.b, steps[Math.max(idx, 0)]);
-      this.rest();
-      return;
-    }
-
-    if (idx < this.displayIndex) {
+    if (added < 0) {
       this.queue = [];
       this.startMs = null;
-      this.displayIndex = idx;
-      setText(this.a, idx > 0 ? steps[idx - 1] : "…");
-      setText(this.b, steps[Math.max(idx, 0)]);
+      setText(this.a, steps.length > 1 ? steps[steps.length - 2] : "");
+      setText(this.b, steps[steps.length - 1]);
       this.rest();
       return;
     }
 
-    for (let i = this.displayIndex + 1; i <= idx; i++) this.queue.push(steps[i]);
-    this.displayIndex = idx;
+    if (added > 0) this.queue.push(...steps.slice(-added));
     if (this.queue.length > MAX_QUEUE) {
       this.queue = this.queue.slice(-MAX_QUEUE);
     }

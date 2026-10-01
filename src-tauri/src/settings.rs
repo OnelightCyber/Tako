@@ -34,10 +34,28 @@ pub struct Settings {
     pub usage_x: f64,
     #[serde(default)]
     pub usage_y: f64,
+    #[serde(default = "default_true")]
+    pub usage_alerts: bool,
+    #[serde(default = "default_true")]
+    pub usage_recharge: bool,
+    #[serde(default)]
+    pub review_mode: bool,
+    #[serde(default = "default_hotkey")]
+    pub mission_hotkey: String,
+    #[serde(default)]
+    pub recent_projects: Vec<String>,
+    #[serde(default = "default_true")]
+    pub media_enabled: bool,
+    #[serde(default = "default_true")]
+    pub stats_enabled: bool,
 }
 
 fn default_usage_position() -> String {
     "island-right".into()
+}
+
+pub fn default_hotkey() -> String {
+    "Alt+Shift+Space".into()
 }
 
 fn default_true() -> bool {
@@ -74,6 +92,13 @@ impl Default for Settings {
             usage_position: default_usage_position(),
             usage_x: 0.0,
             usage_y: 0.0,
+            usage_alerts: true,
+            usage_recharge: true,
+            review_mode: false,
+            mission_hotkey: default_hotkey(),
+            recent_projects: Vec::new(),
+            media_enabled: true,
+            stats_enabled: true,
         }
     }
 }

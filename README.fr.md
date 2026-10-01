@@ -70,6 +70,35 @@ sur une étape plus ancienne la remet à l'écran, un second clic revient au dir
 jusqu'à 30 % en hauteur, des lignes de code larges l'élargissent, puis il revient à sa taille avec la même
 animation à ressort.
 
+### Toutes tes sessions en même temps
+
+Chaque terminal Claude Code a sa pastille à côté du personnage, avec le nom du projet. **Rouge qui pulse** : il
+t'attend. **Vert** : il a fini. Clique une pastille pour afficher sa vue live ; la session qui a besoin de toi passe
+devant toute seule. Un petit anneau montre **le remplissage du contexte** (lu dans le transcript de la session), pour
+savoir quand faire `/compact`.
+
+### Quand Claude a fini
+
+Une carte bilan : les derniers mots de Claude, les fichiers modifiés avec les lignes **+ajoutées −retirées**, le temps
+passé et les tokens utilisés. Trois boutons :
+
+- **Commit** — Claude écrit le message, tu le retouches et tu valides. Seulement les fichiers du tour, ton identité
+  git, sans trailer.
+- **Voir le diff** — tout le tour en un seul diff dans VS Code.
+- **Annuler** — chaque fichier revient comme avant le tour, sauf ceux que tu as retouchés depuis. Avant chaque
+  modification, Tako garde une copie du fichier sur ton PC pendant 3 jours.
+
+### Mode relecture
+
+En option : chaque modification de fichier attend ton OK dans l'îlot, avec le vrai diff et les numéros de ligne —
+**Valider**, **Refuser**, ou tout valider pour le tour. Pas de réponse : la modif n'est pas appliquée. Tako fermé :
+Claude Code fonctionne comme d'habitude.
+
+### Missions
+
+`Alt+Maj+Espace` depuis n'importe où (ou l'onglet fusée) : tape une tâche, choisis le projet, et Tako lance Claude
+Code dessus dans un nouveau terminal — tu suis tout en live depuis l'îlot.
+
 ### Permissions en un clic
 
 Quand Claude Code demande une permission, l'îlot s'ouvre avec **Deny / Allow** (`N` / `Y`) et la commande, le
@@ -102,6 +131,15 @@ un pour la semaine, et le temps avant le reset. Survole-le pour toutes les limit
 un clic droit le masque. Tape `/usage` dans le chat pour les mêmes chiffres en carte. Ils viennent du `/usage` de
 ton propre Claude Code, rafraîchis toutes les 4 minutes.
 
+Tako te **prévient aussi à 80 % et 90 %** avec l'heure où tu atteindras la limite à ce rythme, joue un son quand ta
+limite de 5 h repart à zéro, et garde un **historique** dans les réglages : conso par jour, pic par semaine.
+
+### Une vraie Dynamic Island
+
+- **Musique en cours** : Spotify, YouTube, Deezer… avec la pochette, précédent / lecture / suivant et la barre de
+  progression, et un mini égaliseur dans l'îlot replié.
+- **Ton PC** : processeur, mémoire et carte graphique en direct, dans une pastille.
+
 ### Et aussi
 
 - **Dépôt de fichiers** : glisse un fichier sur l'îlot, il arrive dans le chat. L'îlot caché se réveille quand un
@@ -121,6 +159,14 @@ ton propre Claude Code, rafraîchis toutes les 4 minutes.
 <tr>
 <td width="50%"><img src="docs/screenshots/session-diff.png" alt="Diff numéroté"><br><sub>Le diff d'une modification, numéros de ligne réels</sub></td>
 <td width="50%"><img src="docs/screenshots/session-terminal.png" alt="Terminal"><br><sub>La commande et la fin de sa sortie — l'îlot a grandi pour tout montrer</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/sessions.png" alt="Sessions"><br><sub>Trois sessions, anneau de contexte, musique et stats du PC</sub></td>
+<td><img src="docs/screenshots/review.png" alt="Relecture"><br><sub>Mode relecture : la modif attend ton OK</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/finished.png" alt="Bilan"><br><sub>Le bilan du tour : Commit, diff, Annuler</sub></td>
+<td><img src="docs/screenshots/music.png" alt="Musique"><br><sub>Ce qui joue, avec les commandes</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/session-read.png" alt="Lecture"><br><sub>Un fichier lu, avec coloration</sub></td>
@@ -245,6 +291,15 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
   Claude Code continue. Une exécution du relais tient dans 2 s, 110 s quand un humain doit répondre.
 - **Silence = comportement normal.** Pas de réponse à une permission : le terminal reprend la main.
 - **Les actions de l'agent échouent fermées.** Pas de décision, pas d'action.
+- **Le mode relecture échoue fermé quand Tako tourne** : pas de réponse à temps, Tako en pause, ou trop de modifs
+  d'un coup — la modif est refusée. Il couvre les fichiers, pas les commandes. Tako fermé : Claude Code applique ses
+  propres permissions. Un « autoriser » de Tako ne passe jamais outre tes règles `permissions.deny`.
+- **Pas de clic qui dérape** : une permission ou une relecture qui vient d'apparaître ignore les clics pendant
+  0,7 s, un double-clic ne valide jamais la suivante.
+- **Les copies pour Annuler restent sur ton PC** : avant chaque modif, une copie du fichier va dans
+  `%LOCALAPPDATA%\Tako\snapshots` pendant 3 jours (10 Mo par fichier, 1 Go au total). Les fichiers sensibles —
+  `.env`, clés, certificats, `.ssh`, `.aws`… — ne sont jamais copiés, leur contenu n'est jamais envoyé à Claude pour
+  écrire un message de commit, et le bouton Commit ne les committe pas.
 - **`settings.json` n'est jamais écrasé** : fusion, diff affiché, sauvegarde datée, écriture seulement après ton clic
   et seulement si le fichier n'a pas changé depuis le diff.
 - **Aucune permission accordée sans clic explicite.**
@@ -253,10 +308,11 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
 - **Pas de télémétrie.** Les requêtes réseau vont vers les services que tu configures, et vers Claude via ton propre
   Claude Code.
 - **Rien n'est injecté en HTML** : le code de tes fichiers est construit nœud par nœud, jamais via `innerHTML`.
-- **0 % de CPU caché** : animations et suivi du curseur s'arrêtent ; seules 8 lectures Win32 par seconde guettent un
-  fichier glissé vers l'îlot caché.
+- **0 % de CPU caché** : animations, suivi du curseur, musique et stats du PC s'arrêtent ; seules 8 lectures Win32
+  par seconde guettent un fichier glissé vers l'îlot caché.
 - **Le relais vérifie à qui il parle** : le pipe nommé est lié à ton compte Windows (SID) et le serveur est contrôlé
-  avant chaque envoi.
+  avant chaque envoi. Les programmes qui tournent sous ton propre compte sont considérés comme fiables, comme pour
+  tout ce qu'ils peuvent déjà faire en ton nom.
 
 ---
 
@@ -305,8 +361,11 @@ npm run dev             # juste l'interface dans un navigateur
 - **Démo du dépôt de fichiers** : <http://127.0.0.1:1420/dev/upload-preview.html>.
 - **Démo de l'utilisation** : <http://127.0.0.1:1420/?demo=usage> (la carte `/usage`) et
   <http://127.0.0.1:1420/usage.html?open> (le widget).
+- **Nouvelles vues** : <http://127.0.0.1:1420/?feature=overview> (aussi `review`, `finished`, `music`, `system`,
+  `mission`, `usage`).
 - **Tests** : `cargo test -p tako-hook --release` (relais, garde-fou de l'agent, serveur MCP) et
-  `cargo test -p tako --lib` (hooks, fichiers, réglages, lecture de `/usage`, placement du widget).
+  `cargo test -p tako --lib` (hooks, fichiers, sessions, Annuler et Commit sur un vrai dépôt, prévisions et alertes
+  de `/usage`, placement du widget, musique, stats du PC).
 - **Icônes** : `npm run icons` les redessine depuis `scripts/gen-icons.mjs`.
 - **Log** : `%LOCALAPPDATA%\Tako\tako.log` — événements des hooks, décisions, forme des résultats d'outils (clés
   seulement), drags, navigateur, erreurs du chat. Il reste sur ta machine.
@@ -331,8 +390,11 @@ src/                      interface de l'îlot (TypeScript, sans framework)
   usage/                  le widget d'utilisation
 src-tauri/src/            backend Rust
   claude_cli.rs           chat via le Claude Code de l'utilisateur
-  usage.rs                le /usage de Claude Code, lu et mis en cache
+  usage.rs                le /usage de Claude Code, historique, prévision, alertes
   widget.rs               la fenêtre du widget : places, drag, aimantation
+  sessions.rs             contexte, bilan du tour, Annuler, Commit, diff, missions
+  media.rs                ce qui joue (sessions média Windows)
+  sysstats.rs             processeur, mémoire, carte graphique
   browser.rs              serveur Playwright persistant de l'agent
   updater.rs              mises à jour signées depuis les releases GitHub
   pipe.rs                 pipe nommé, permissions, actions d'agent
@@ -340,6 +402,8 @@ src-tauri/src/            backend Rust
   island.rs               fenêtre, clic traversant, curseur, dépôt de fichiers
 hook/src/                 tako-hook.exe
   main.rs                 le relais des hooks
+  snapshot.rs             une copie de chaque fichier avant que Claude le modifie
+  review.rs               le diff affiché en mode relecture
   mcp.rs, screen.rs       le serveur MCP de capture d'écran
 sounds/                   les 28 sons de Tako
 dev/                      démos et bannière (jamais livrées)
@@ -359,9 +423,11 @@ docs/                     bannière, GIF et captures
 - [x] Réglages complets, logos des intégrations, mises à jour signées
 - [x] Personnage, icône et sons propres à Tako
 - [x] **Widget d'utilisation** : limites de 5 h et de la semaine à l'écran, déplaçable, et `/usage` dans le chat
+- [x] **Multi-sessions** avec une pastille par terminal et un anneau de contexte
+- [x] **Bilan du tour** avec Commit, diff et Annuler, et un **mode relecture** en option
+- [x] **Missions** depuis un raccourci global
+- [x] Alertes de limite, prévision et historique ; musique ; stats du PC
 - [ ] Réglages en anglais
-- [ ] **Multi-sessions** : une pastille par terminal Claude Code
-- [ ] **Missions** : lancer une tâche Claude Code complète depuis l'îlot
 - [ ] **Mode jeu** : rien ne s'ouvre pendant un jeu en plein écran
 - [ ] **Monitoring serveurs** : up / down, CPU, RAM, disque, conteneurs
 - [ ] **Garde-fous de session** : bloquer les commandes dangereuses, signaler l'accès aux secrets

@@ -1,4 +1,4 @@
-import type { UsageReport } from "../src/core/bridge";
+import type { UsageReport, UsageSample } from "../src/core/bridge";
 import type { Island } from "../src/island/island";
 import { State } from "../src/core/state";
 
@@ -23,6 +23,24 @@ export function demoUsage(): UsageReport {
     fetchedAt: Math.floor(Date.now() / 1000) - 120,
     error: null,
   };
+}
+
+export function demoHistory(): UsageSample[] {
+  const out: UsageSample[] = [];
+  const now = Math.floor(Date.now() / 1000);
+  let week = 0;
+  for (let h = 24 * 13; h >= 0; h -= 2) {
+    const t = now - h * 3600;
+    const day = new Date(t * 1000).getDay();
+    if (day === 1 && new Date(t * 1000).getHours() < 2) week = 0;
+    const busy = new Date(t * 1000).getHours();
+    if (busy >= 9 && busy <= 23) week = Math.min(100, week + (day === 0 || day === 6 ? 1 : 2));
+    const monday = new Date(t * 1000);
+    monday.setDate(monday.getDate() + ((8 - monday.getDay()) % 7 || 7));
+    const resets = `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][monday.getMonth()]} ${monday.getDate()}, 7am (Europe/Paris)`;
+    out.push({ t, session: (busy * 7) % 100, week, sessionResets: `s${Math.floor(h / 5)}`, weekResets: resets });
+  }
+  return out;
 }
 
 export function runUsageDemo(island: Island) {

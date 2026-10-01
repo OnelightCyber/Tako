@@ -6,9 +6,12 @@ mod hooks;
 mod integrations;
 mod island;
 mod log;
+mod media;
 mod pipe;
 mod secrets;
+mod sessions;
 mod settings;
+mod sysstats;
 mod tray;
 mod updater;
 mod usage;
@@ -86,8 +89,45 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     warm_browser(&app, &settings);
     widget::sync(&app, &settings);
+    apply_features(&app, &settings);
 
     let _ = app.emit("settings-changed", settings);
+}
+
+fn apply_features(app: &AppHandle, settings: &Settings) {
+    sessions::set_review_flag(settings.review_mode);
+    media::set_enabled(settings.media_enabled);
+    sysstats::set_enabled(settings.stats_enabled);
+    register_hotkey(app, &settings.mission_hotkey);
+}
+
+static HOTKEY_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn register_hotkey(app: &AppHandle, hotkey: &str) {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let shortcuts = app.global_shortcut();
+    let _ = shortcuts.unregister_all();
+    let mut error = None;
+    if !hotkey.is_empty() && hotkey != "off" {
+        match hotkey.parse::<Shortcut>() {
+            Ok(shortcut) => {
+                if let Err(err) = shortcuts.register(shortcut) {
+                    log::line(format!("hotkey {hotkey} unavailable: {err}"));
+                    error = Some(err.to_string());
+                }
+            }
+            Err(err) => {
+                log::line(format!("hotkey {hotkey} invalid: {err}"));
+                error = Some(err.to_string());
+            }
+        }
+    }
+    *HOTKEY_ERROR.lock().unwrap() = error;
+}
+
+#[tauri::command]
+fn hotkey_status() -> Option<String> {
+    HOTKEY_ERROR.lock().unwrap().clone()
 }
 
 fn warm_browser(app: &AppHandle, settings: &Settings) {
@@ -150,6 +190,10 @@ fn open_url(url: String) {
 
 #[tauri::command]
 fn open_in_vscode(path: Option<String>) -> bool {
+    launch_vscode(path)
+}
+
+pub(crate) fn launch_vscode(path: Option<String>) -> bool {
     if let Some(code) = find_on_path("code") {
         let mut cmd = Command::new(code);
         if let Some(p) = path.as_deref().filter(|p| !p.is_empty()) {
@@ -165,7 +209,7 @@ fn open_in_vscode(path: Option<String>) -> bool {
     false
 }
 
-fn find_on_path(stem: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn find_on_path(stem: &str) -> Option<std::path::PathBuf> {
     let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
     let dirs = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&dirs) {
@@ -417,6 +461,79 @@ async fn usage_get(app: AppHandle, force: bool) -> usage::UsageReport {
     usage::get(&app, force).await
 }
 
+#[tauri::command]
+fn usage_history(app: AppHandle) -> Vec<usage::Sample> {
+    usage::history(&app)
+}
+
+#[tauri::command]
+fn session_summary(session_id: String, cwd: String) -> Option<sessions::TurnSummary> {
+    let safe = sessions::safe_id(&session_id)?;
+    let mut summary = sessions::summary(&safe, &cwd, None)?;
+    summary.session_id = session_id;
+    Some(summary)
+}
+
+#[tauri::command]
+async fn session_undo(session_id: String) -> Result<sessions::UndoReport, String> {
+    tauri::async_runtime::spawn_blocking(move || sessions::undo(&session_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn session_diff(session_id: String, project: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || sessions::open_diff(&session_id, &project))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn session_commit_message(session_id: String, cwd: String) -> Result<String, String> {
+    sessions::commit_message(session_id, cwd).await
+}
+
+#[tauri::command]
+async fn session_commit(session_id: String, cwd: String, message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || sessions::commit(&session_id, &cwd, &message))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn mission_start(app: AppHandle, task: String, cwd: String) -> Result<(), String> {
+    sessions::start_mission(&task, &cwd)?;
+    let shared = app.state::<Shared>();
+    let updated = {
+        let mut s = shared.settings.lock().unwrap();
+        s.recent_projects.retain(|p| !p.eq_ignore_ascii_case(&cwd));
+        s.recent_projects.insert(0, cwd.clone());
+        s.recent_projects.truncate(8);
+        s.clone()
+    };
+    let _ = settings::save(&updated);
+    let _ = app.emit("settings-changed", updated);
+    Ok(())
+}
+
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_title("Dossier du projet").pick_folder(move |folder| {
+        let _ = tx.send(folder);
+    });
+    let folder = rx.await.ok()??;
+    folder.into_path().ok().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn media_control(action: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || media::control(&action))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn create_settings_window(app: &AppHandle) {
     let url = settings_page_url(app);
     match WebviewWindowBuilder::new(app, "settings", url)
@@ -467,6 +584,16 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        let _ = app.emit_to(island::WINDOW_LABEL, "mission-open", ());
+                    }
+                })
+                .build(),
+        )
         .manage(Shared {
             settings: Mutex::new(loaded.clone()),
             gate: gate.clone(),
@@ -476,6 +603,7 @@ pub fn run() {
         .manage(claude_cli::CliChat::default())
         .manage(browser::Browser::default())
         .manage(usage::Usage::default())
+        .manage(sessions::Sessions::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -500,6 +628,16 @@ pub fn run() {
             update_install,
             chat_commands,
             usage_get,
+            usage_history,
+            session_summary,
+            session_undo,
+            session_diff,
+            session_commit_message,
+            session_commit,
+            mission_start,
+            pick_folder,
+            hotkey_status,
+            media_control,
             widget::usage_resize,
             widget::usage_drag,
             widget::usage_close,
@@ -559,6 +697,10 @@ pub fn run() {
             updater::start(handle.clone());
             usage::start(handle.clone());
             widget::sync(&handle, &loaded);
+            sessions::start_cleanup();
+            media::start(handle.clone(), gate.clone());
+            sysstats::start(handle.clone(), gate.clone());
+            apply_features(&handle, &loaded);
             Ok(())
         })
         .build(tauri::generate_context!())

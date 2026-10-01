@@ -6,11 +6,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
 const FIRE_AND_FORGET_BUDGET: Duration = Duration::from_secs(2);
 
-const DECISION_BUDGET: Duration = Duration::from_secs(110);
+const DECISION_BUDGET: Duration = Duration::from_secs(100);
 
 const ERROR_PIPE_BUSY: i32 = 231;
-
-const DROPPED_FIELDS: &[&str] = &["transcript_path"];
 
 const DROPPED_RESPONSE_FIELDS: &[&str] = &["originalFile", "base64"];
 
@@ -34,9 +32,10 @@ enum Wait {
     None,
     Permission,
     AgentAction,
+    Review,
 }
 
-fn wait_for(event: &str, origin: &str, tool: &str) -> Wait {
+fn wait_for(event: &str, origin: &str, tool: &str, review: bool) -> Wait {
     if event == "PermissionRequest" {
         return Wait::Permission;
     }
@@ -44,11 +43,21 @@ fn wait_for(event: &str, origin: &str, tool: &str) -> Wait {
     if event == "PreToolUse" && origin == "chat" && GATED_AGENT_TOOLS.contains(&browser_tool) {
         return Wait::AgentAction;
     }
+    if event == "PreToolUse" && origin != "chat" && review && snapshot::EDIT_TOOLS.contains(&tool) {
+        return Wait::Review;
+    }
     Wait::None
 }
 
+enum Talk {
+    Unreachable,
+    Answer(Option<String>),
+}
+
 mod mcp;
+mod review;
 mod screen;
+mod snapshot;
 mod win;
 
 fn pipe_path() -> String {
@@ -82,20 +91,26 @@ fn main() {
         mcp::serve();
         return;
     }
+    let started = Instant::now();
     let Some((payload, wait)) = read_event() else { std::process::exit(0) };
 
     let waits_for_answer = wait != Wait::None;
-    let budget = if waits_for_answer { DECISION_BUDGET } else { FIRE_AND_FORGET_BUDGET };
+    let budget = if waits_for_answer { DECISION_BUDGET.saturating_sub(started.elapsed()) } else { FIRE_AND_FORGET_BUDGET };
 
-    let (tx, rx) = mpsc::channel::<Option<String>>();
+    let (tx, rx) = mpsc::channel::<Talk>();
     std::thread::spawn(move || {
         let _ = tx.send(talk(&payload, waits_for_answer));
     });
 
-    let decision = rx.recv_timeout(budget).ok().flatten();
+    let (reachable, decision) = match rx.recv_timeout(budget) {
+        Ok(Talk::Unreachable) => (false, None),
+        Ok(Talk::Answer(answer)) => (true, answer),
+        Err(_) => (true, None),
+    };
     let json = match wait {
         Wait::Permission => decision.as_deref().and_then(decision_json),
         Wait::AgentAction => Some(agent_decision_json(decision.as_deref().unwrap_or("deny"))),
+        Wait::Review => review_decision_json(reachable, decision.as_deref()),
         Wait::None => None,
     };
     if let Some(json) = json {
@@ -113,6 +128,33 @@ fn agent_decision_json(decision: &str) -> String {
             r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}"#.to_string()
         }
         _ => r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The user did not allow this browser action in Tako."}}"#.to_string(),
+    }
+}
+
+fn pre_tool_deny(reason: &str) -> String {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    })
+    .to_string()
+}
+
+fn review_decision_json(reachable: bool, decision: Option<&str>) -> Option<String> {
+    if !reachable {
+        return None;
+    }
+    match decision.map(str::trim) {
+        Some("allow") | Some("always") => {
+            Some(r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}"#.to_string())
+        }
+        Some("pass") => None,
+        Some("deny") => Some(pre_tool_deny(
+            "The user rejected this edit in Tako's review. Ask them what they want changed instead.",
+        )),
+        _ => Some(pre_tool_deny("This edit was not approved in Tako in time, so it was not applied.")),
     }
 }
 
@@ -151,13 +193,37 @@ fn read_event() -> Option<(String, Wait)> {
 
     let origin = std::env::var("TAKO_ORIGIN").unwrap_or_default();
     let tool = map.get("tool_name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let wait = wait_for(&event, &origin, &tool);
-    if wait == Wait::AgentAction {
+    let data = snapshot::data_dir();
+    let review_on = data.as_ref().map(|d| d.join("review-mode").exists()).unwrap_or(false);
+    let wait = wait_for(&event, &origin, &tool, review_on);
+    if wait == Wait::AgentAction || wait == Wait::Review {
         map.insert("await_decision".into(), serde_json::Value::Bool(true));
     }
 
-    for field in DROPPED_FIELDS {
-        map.remove(*field);
+    let mut review_preview = None;
+    if origin != "chat" {
+        let session = map.get("session_id").and_then(|v| v.as_str()).and_then(snapshot::safe_id);
+        let cwd = map.get("cwd").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let input = map.get("tool_input").cloned().unwrap_or(serde_json::Value::Null);
+        if let (Some(dir), Some(session)) = (data.as_ref(), session) {
+            match event.as_str() {
+                "UserPromptSubmit" => snapshot::start_turn(dir, &session),
+                "PreToolUse" => {
+                    if let Some(path) = snapshot::target_path(&tool, &input, &cwd) {
+                        if wait == Wait::Review {
+                            review_preview = Some(review::preview(&tool, &input, &path));
+                        }
+                        snapshot::before(dir, &session, &path);
+                    }
+                }
+                "PostToolUse" => {
+                    if let Some(path) = snapshot::target_path(&tool, &input, &cwd) {
+                        snapshot::after(dir, &session, &path);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     let cwd_missing = map
@@ -194,6 +260,9 @@ fn read_event() -> Option<(String, Wait)> {
 
     truncate_strings(&mut payload);
     cap_lists(&mut payload);
+    if let (Some(preview), Some(map)) = (review_preview, payload.as_object_mut()) {
+        map.insert("tako_review".into(), preview);
+    }
 
     let mut line = payload.to_string();
     if line.len() > MAX_LINE_LEN {
@@ -264,16 +333,16 @@ fn truncate_strings(value: &mut serde_json::Value) {
     }
 }
 
-fn talk(payload: &str, waits_for_answer: bool) -> Option<String> {
-    let mut pipe = connect()?;
+fn talk(payload: &str, waits_for_answer: bool) -> Talk {
+    let Some(mut pipe) = connect() else { return Talk::Unreachable };
 
     if pipe.write_all(payload.as_bytes()).is_err() {
-        return None;
+        return Talk::Unreachable;
     }
     let _ = pipe.flush();
 
     if !waits_for_answer {
-        return None;
+        return Talk::Answer(None);
     }
 
     let mut buf = Vec::new();
@@ -291,7 +360,7 @@ fn talk(payload: &str, waits_for_answer: bool) -> Option<String> {
         }
     }
     let answer = String::from_utf8_lossy(&buf).trim().to_string();
-    (!answer.is_empty()).then_some(answer)
+    Talk::Answer((!answer.is_empty()).then_some(answer))
 }
 
 #[cfg(test)]
@@ -320,12 +389,33 @@ mod tests {
 
     #[test]
     fn only_the_chat_agents_acting_browser_tools_wait() {
-        assert_eq!(wait_for("PermissionRequest", "", "Bash"), Wait::Permission);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate"), Wait::AgentAction);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click"), Wait::AgentAction);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_snapshot"), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "", "mcp__playwright__browser_navigate"), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "chat", "Read"), Wait::None);
+        assert_eq!(wait_for("PermissionRequest", "", "Bash", false), Wait::Permission);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate", false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click", false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_snapshot", false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "mcp__playwright__browser_navigate", false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "chat", "Read", false), Wait::None);
+    }
+
+    #[test]
+    fn review_mode_holds_edits_from_terminal_sessions_only() {
+        assert_eq!(wait_for("PreToolUse", "", "Edit", true), Wait::Review);
+        assert_eq!(wait_for("PreToolUse", "mission", "Write", true), Wait::Review);
+        assert_eq!(wait_for("PreToolUse", "", "Edit", false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "chat", "Edit", true), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "Bash", true), Wait::None);
+        assert_eq!(wait_for("PostToolUse", "", "Edit", true), Wait::None);
+    }
+
+    #[test]
+    fn review_answers_map_to_pre_tool_decisions() {
+        assert_eq!(review_decision_json(false, None), None);
+        assert_eq!(review_decision_json(false, Some("deny")), None);
+        assert_eq!(review_decision_json(true, Some("pass")), None);
+        assert!(review_decision_json(true, Some("allow")).unwrap().contains(r#""permissionDecision":"allow""#));
+        assert!(review_decision_json(true, Some("deny")).unwrap().contains(r#""permissionDecision":"deny""#));
+        assert!(review_decision_json(true, None).unwrap().contains("in time"));
+        assert!(review_decision_json(true, Some("maybe")).unwrap().contains(r#""permissionDecision":"deny""#));
     }
 
     #[test]

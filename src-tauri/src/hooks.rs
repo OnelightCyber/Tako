@@ -11,7 +11,7 @@ pub const HOOK_EVENTS: &[(&str, u64)] = &[
     ("SessionStart", 10),
     ("SessionEnd", 10),
     ("UserPromptSubmit", 10),
-    ("PreToolUse", 10),
+    ("PreToolUse", 120),
     ("PostToolUse", 10),
     ("PostToolUseFailure", 10),
     ("PermissionRequest", 120),
@@ -29,6 +29,7 @@ const MARKER: &str = "tako-hook";
 #[serde(rename_all = "camelCase")]
 pub struct HookStatus {
     pub installed: bool,
+    pub up_to_date: bool,
     pub settings_path: String,
     pub hook_path: String,
     pub hook_ready: bool,
@@ -136,6 +137,26 @@ fn merged(existing: &Value) -> Value {
     Value::Object(root)
 }
 
+fn ours_match(existing: &Value) -> bool {
+    let Some(hooks) = existing.get("hooks").and_then(Value::as_object) else { return false };
+    HOOK_EVENTS.iter().all(|(event, timeout)| {
+        hooks
+            .get(*event)
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter().filter(|e| entry_is_ours(e)).any(|entry| {
+                    entry.get("hooks").and_then(Value::as_array).map(|hs| {
+                        hs.iter().any(|h| {
+                            h.get("command").and_then(Value::as_str) == Some(hook_command(event).as_str())
+                                && h.get("timeout").and_then(Value::as_u64) == Some(*timeout)
+                        })
+                    }).unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 fn without_ours(existing: &Value) -> Value {
     let mut root = existing.as_object().cloned().unwrap_or_default();
     let Some(hooks) = root.get("hooks").and_then(Value::as_object).cloned() else {
@@ -213,6 +234,7 @@ pub fn status() -> HookStatus {
     let hook_path = settings::hook_exe_path();
     HookStatus {
         installed,
+        up_to_date: installed && ours_match(&current),
         settings_path: settings_path().to_string_lossy().to_string(),
         hook_ready: hook_path.exists(),
         hook_path: hook_path.to_string_lossy().to_string(),

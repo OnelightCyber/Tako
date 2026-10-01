@@ -8,6 +8,11 @@ import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 import { buildSession } from "./session";
+import { proIcon } from "./pro-icons";
+import {
+  buildFinished, buildMission, buildMusic, buildReview, buildSystem, buildUsageAlert,
+  contextBadge, mediaPill, statsPill,
+} from "./extra";
 
 export interface ViewActions {
   setView(v: IslandViewName): void;
@@ -17,7 +22,7 @@ export interface ViewActions {
 
   openTarget(): void;
   openUrl(url: string): void;
-  decide(d: "allow" | "deny"): void;
+  decide(d: "allow" | "deny" | "all"): void;
   toggleSound(): void;
   setVolume(v: number): void;
   setAutoClose(seconds: number): void;
@@ -79,6 +84,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   }, svg(ICONS.house, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
+  const tabMission = h("button", { class: "tab", title: "Mission", onclick: () => go("mission") }, proIcon("rocket", 13, 2));
 
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
@@ -91,7 +97,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
+    h("div", { class: "tabs" }, tabHome, tabChat, tabMission, tabDrop),
     h("div", { class: "header-actions" }, gearBtn, soundBtn),
   );
 
@@ -102,6 +108,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty" || v === "session");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
+      tabMission.classList.toggle("on", v === "mission");
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
@@ -136,6 +143,8 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
 
   let pillIds = "";
+  const media = mediaPill(actions);
+  const stats = statsPill(actions);
   let detailOpen = false;
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | null = null;
@@ -175,8 +184,7 @@ function buildOverview(actions: ViewActions): ViewHost {
         mode = null;
       }
 
-      const sessionActive =
-        task?.id === "integration_claude" && (task.state !== "idle" || task.steps.length > 0);
+      const sessionActive = !!task?.sessionId && (task.state !== "idle" || task.steps.length > 0);
 
       if (task && sessionActive) {
         if (mode !== "ticker") {
@@ -189,14 +197,11 @@ function buildOverview(actions: ViewActions): ViewHost {
         who.append(
           dot(task.color, 7),
           h("span", { class: "name", text: task.name }),
-          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
+          h("span", { class: "tool", text: task.origin === "mission" ? "Mission" : task.source === "claudeCode" ? "Claude Code" : "n8n" }),
         );
-        if (task.steps.length > 1) {
-          who.append(h("span", {
-            class: "count",
-            text: `${Math.min(task.stepIndex + 1, task.steps.length)}/${task.steps.length}`,
-          }));
-        }
+        const ctx = contextBadge(task);
+        if (ctx) who.append(ctx);
+        else if ((task.stepTotal ?? 0) > 1) who.append(h("span", { class: "count", text: `${task.stepTotal} étapes` }));
         ticker.sync(task);
       } else if (task) {
         const info = State.integrations[task.id];
@@ -215,20 +220,27 @@ function buildOverview(actions: ViewActions): ViewHost {
 
       jump.style.display = detailOpen ? "none" : "";
 
-      const others = State.otherTasks.slice(0, 4);
-      const pillKey = others.map((t) => `${t.id}:${t.pillBadge ?? ""}`).join("|");
+      const showMedia = State.settings.mediaEnabled && !!State.media?.active;
+      const showStats = State.settings.statsEnabled && !!State.stats;
+      const room = 6 - (showMedia ? 1 : 0) - (showStats ? 1 : 0);
+      const others = State.otherTasks.slice(0, Math.min(4, room));
+      const pillKey = `${others.map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.name}`).join("|")}~${showMedia}~${showStats}`;
       if (pillKey !== pillIds) {
         pillIds = pillKey;
         clear(pills);
         for (const t of others) pills.append(buildPill(t, actions));
+        if (showMedia) pills.append(media.el);
+        if (showStats) pills.append(stats.el);
         pruneMiniBots();
       }
+      if (showMedia) media.update();
+      if (showStats) stats.update();
     },
   };
 }
 
 function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
-  const label = task.id === "integration_claude" ? "VS Code" : task.name;
+  const label = task.name;
   const canvas = createMiniBot(task, 24);
   const pill = h(
     "div",
@@ -251,10 +263,10 @@ function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
   });
 
   if (task.pillBadge) {
-    const colors = { approval: "#F5A524", finished: "#22C55E", error: "#F4505E" } as const;
+    const colors = { approval: "#F4505E", finished: "#22C55E", error: "#F4505E" } as const;
     const icons = { approval: ICONS.bang, finished: ICONS.check, error: ICONS.xmark } as const;
     const inner = h("i", { style: `background:${colors[task.pillBadge]}` }, svg(icons[task.pillBadge], 6, { stroke: task.pillBadge === "finished" ? 3 : 0 }));
-    const badge = h("div", { class: "pill-badge" }, inner);
+    const badge = h("div", { class: `pill-badge ${task.pillBadge}` }, inner);
     badge.style.boxShadow = `0 0 4px ${colors[task.pillBadge]}99`;
     pill.append(badge);
   }
@@ -295,21 +307,27 @@ function buildApproval(actions: ViewActions): ViewHost {
     el,
     sync() {
       clear(who);
-      if (State.pendingApproval?.origin === "chat") {
+      const req = State.pendingApproval;
+      if (req?.origin === "chat") {
         who.append(h("div", { class: "who-row" }, dot("#FF7A59", 8), h("span", { class: "n", text: "Tako agent" }), h("span", { text: "wants to use the browser" })));
       } else {
-        who.append(agentWho(State.focusTask, "needs permission"));
+        const task = State.tasks.find((t) => t.id === req?.taskId) ?? State.focusTask;
+        who.append(agentWho(task, "needs permission"));
       }
+      if (State.approvalQueue.length) who.append(h("span", { class: "rv-queue inline", text: `+${State.approvalQueue.length} en attente` }));
 
       code.textContent = State.pendingApproval?.command || State.pendingApproval?.tool || "…";
 
-      if (rowKey === "built") return;
-      rowKey = "built";
-      clear(row);
-      row.append(
-        btn("Deny", "secondary", () => actions.decide("deny"), "N"),
-        btn("Allow", "primary", () => actions.decide("allow"), "Y"),
-      );
+      const fresh = Date.now() - (req?.shownAt ?? 0) < 700;
+      if (rowKey !== "built") {
+        rowKey = "built";
+        clear(row);
+        row.append(
+          btn("Deny", "secondary", () => actions.decide("deny"), "N"),
+          btn("Allow", "primary", () => actions.decide("allow"), "Y"),
+        );
+      }
+      row.lastElementChild?.classList.toggle("guard", fresh);
     },
   };
 }
@@ -349,24 +367,6 @@ function buildError(actions: ViewActions): ViewHost {
       who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
       title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
       detail.textContent = task?.steps.at(-1) ?? "No detail available.";
-    },
-  };
-}
-
-function buildFinished(actions: ViewActions): ViewHost {
-  const who = h("div");
-  const title = h("div", { class: "title" });
-  const row = h("div", { class: "actions" },
-    btn("Open terminal", "primary", () => actions.openTerminal()),
-    btn("OK", "secondary", () => actions.collapse()),
-  );
-  const el = h("div", { class: "view" }, card("green", stack(116, 16, who, title, row)));
-  return {
-    el,
-    sync() {
-      clear(who);
-      who.append(agentWho(State.focusTask, "Claude Code finished"));
-      title.textContent = State.focusTask?.steps.at(-1) ?? "Session finished";
     },
   };
 }
@@ -484,6 +484,11 @@ export function buildViews(
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());
   map.set("choose", buildChoose(actions));
+  map.set("review", buildReview(actions));
+  map.set("mission", buildMission(actions));
+  map.set("music", buildMusic());
+  map.set("system", buildSystem());
+  map.set("usage", buildUsageAlert(actions));
 
   map.set("mail", buildPlaceholder("Sending by email isn't in this version.", ""));
   map.set("searching", buildPlaceholder("Claude is searching…", ""));
