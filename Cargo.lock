@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "tako"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "keyring",
  "reqwest 0.12.28",
@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "tako-hook"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "png 0.17.16",
  "serde_json",
