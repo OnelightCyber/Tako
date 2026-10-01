@@ -26,6 +26,18 @@ pub struct Settings {
     pub chat_screen: bool,
     #[serde(default)]
     pub agent_auto: bool,
+    #[serde(default = "default_true")]
+    pub usage_widget: bool,
+    #[serde(default = "default_usage_position")]
+    pub usage_position: String,
+    #[serde(default)]
+    pub usage_x: f64,
+    #[serde(default)]
+    pub usage_y: f64,
+}
+
+fn default_usage_position() -> String {
+    "island-right".into()
 }
 
 fn default_true() -> bool {
@@ -58,6 +70,10 @@ impl Default for Settings {
             open_on_finish: true,
             chat_screen: true,
             agent_auto: false,
+            usage_widget: true,
+            usage_position: default_usage_position(),
+            usage_x: 0.0,
+            usage_y: 0.0,
         }
     }
 }

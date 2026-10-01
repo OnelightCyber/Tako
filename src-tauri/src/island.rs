@@ -6,10 +6,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    WS_EX_TOOLWINDOW, GetSystemMetrics, SM_SWAPBUTTON,
 };
 
 pub const PANEL_W: f64 = 860.0;
@@ -101,8 +101,10 @@ fn cursor_physical() -> Option<(f64, f64)> {
     Some((p.x as f64, p.y as f64))
 }
 
-fn left_button_down() -> bool {
-    unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+pub fn primary_button_down() -> bool {
+    let swapped = unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0;
+    let key = if swapped { VK_RBUTTON } else { VK_LBUTTON };
+    unsafe { (GetAsyncKeyState(key.0 as i32) as u16 & 0x8000) != 0 }
 }
 
 fn monitor_contains(m: &Monitor, x: f64, y: f64) -> bool {
@@ -114,7 +116,7 @@ fn monitor_contains(m: &Monitor, x: f64, y: f64) -> bool {
         && y < (p.y + s.height as i32) as f64
 }
 
-fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
+pub fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
     let monitors = app.available_monitors().ok()?;
     if pref == "cursor" {
         if let Some((cx, cy)) = cursor_physical() {
@@ -257,7 +259,7 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
                     && y >= r.y - HIT_MARGIN
                     && y <= r.y + r.h + HIT_MARGIN;
 
-                let down = left_button_down();
+                let down = primary_button_down();
 
                 let dragging = down
                     && x >= 0.0
@@ -292,7 +294,7 @@ pub fn spawn_drag_watch(app: AppHandle, gate: Arc<PollGate>) {
         let mut fired = false;
         loop {
             std::thread::sleep(Duration::from_millis(120));
-            let down = left_button_down();
+            let down = primary_button_down();
             if !down {
                 fired = false;
                 continue;

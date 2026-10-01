@@ -1,6 +1,7 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName, SizeHint } from "./layout";
 import type { EyeShape } from "../mascot/engine";
 import type { Activity } from "./activity";
+import type { UsageReport } from "./bridge";
 
 export type AgentSource = "claudeCode" | "n8n";
 export type PillBadge = "approval" | "finished" | "error";
@@ -36,6 +37,7 @@ export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  usage?: UsageReport;
 }
 
 export type PromptContext =
@@ -99,6 +101,10 @@ export interface Settings {
   openOnFinish: boolean;
   chatScreen: boolean;
   agentAuto: boolean;
+  usageWidget: boolean;
+  usagePosition: "island-right" | "island-left" | "corner-right" | "corner-left" | "custom";
+  usageX: number;
+  usageY: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -118,6 +124,10 @@ export const DEFAULT_SETTINGS: Settings = {
   openOnFinish: true,
   chatScreen: true,
   agentAuto: false,
+  usageWidget: true,
+  usagePosition: "island-right",
+  usageX: 0,
+  usageY: 0,
 };
 
 type Listener = () => void;

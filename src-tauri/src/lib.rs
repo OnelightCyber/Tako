@@ -11,6 +11,8 @@ mod secrets;
 mod settings;
 mod tray;
 mod updater;
+mod usage;
+mod widget;
 mod win_user;
 
 use std::os::windows::process::CommandExt;
@@ -83,6 +85,7 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
         island::apply_geometry(&app, &settings.screen, collapsed);
     }
     warm_browser(&app, &settings);
+    widget::sync(&app, &settings);
 
     let _ = app.emit("settings-changed", settings);
 }
@@ -397,7 +400,7 @@ fn log_line(message: String) {
     log::line(format!("ui  {message}"));
 }
 
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+pub(crate) const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 
 fn settings_page_url(app: &AppHandle) -> WebviewUrl {
     #[cfg(dev)]
@@ -407,6 +410,11 @@ fn settings_page_url(app: &AppHandle) -> WebviewUrl {
     }
     let _ = app;
     WebviewUrl::App("settings.html".into())
+}
+
+#[tauri::command]
+async fn usage_get(app: AppHandle, force: bool) -> usage::UsageReport {
+    usage::get(&app, force).await
 }
 
 fn create_settings_window(app: &AppHandle) {
@@ -467,6 +475,7 @@ pub fn run() {
         .manage(Chat::default())
         .manage(claude_cli::CliChat::default())
         .manage(browser::Browser::default())
+        .manage(usage::Usage::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
@@ -490,6 +499,10 @@ pub fn run() {
             update_check,
             update_install,
             chat_commands,
+            usage_get,
+            widget::usage_resize,
+            widget::usage_drag,
+            widget::usage_close,
             claude_code_info,
             open_tako_folder,
             show_island,
@@ -508,6 +521,7 @@ pub fn run() {
             tray::build(&handle)?;
 
             create_settings_window(&handle);
+            widget::create(&handle);
 
             if let Some(win) = island::window(&handle) {
                 island::make_non_activating(&win);
@@ -543,6 +557,8 @@ pub fn run() {
             }
             integrations::start(handle.clone());
             updater::start(handle.clone());
+            usage::start(handle.clone());
+            widget::sync(&handle, &loaded);
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -92,6 +92,14 @@ forms. The browser **stays open** between messages, with a profile of its own. B
 does something — open a page, click, type, run JavaScript — is asked in the island with the exact URL or text;
 **auto mode** lets everything through.
 
+### Usage widget
+
+Your Claude limits, always in sight: a small widget at the top of the screen with a ring for the 5-hour session, one
+for the week, and the time left before the reset. Hover it for every limit (all models, per model). **Drag it
+anywhere** — it snaps to the top edge and back next to the island — or pick a spot in the settings; a right-click
+hides it. Type `/usage` in the chat for the same numbers as a card. They come from your own Claude Code's `/usage`,
+refreshed every 4 minutes.
+
 ### And also
 
 - **File drops**: drop a file on the island and it lands in the chat. The hidden island wakes up when a file comes
@@ -121,7 +129,12 @@ does something — open a page, click, type, run JavaScript — is asked in the 
 <td><img src="docs/screenshots/settings-chat.png" alt="Settings chat"><br><sub>Chat, screen vision and the browser agent</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="docs/screenshots/settings-integrations.png" alt="Integrations" width="70%"><br><sub>Integrations</sub></td>
+<td><img src="docs/screenshots/usage-chat.png" alt="/usage in the chat"><br><sub><code>/usage</code> in the chat</sub></td>
+<td align="center"><img src="docs/screenshots/usage-widget.png" alt="Usage widget" width="250"><br><sub>The usage widget, hovered</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/settings-usage.png" alt="Widget settings"><br><sub>Where the widget sits — or drag it</sub></td>
+<td><img src="docs/screenshots/settings-integrations.png" alt="Integrations"><br><sub>Integrations</sub></td>
 </tr>
 </table>
 
@@ -268,6 +281,9 @@ exactly what happens here: everyone uses their own account, on their own machine
         claude -p (stream-json) ──► chat-delta / chat-status to the island
           ├─ MCP "tako"          tako-hook.exe mcp → screenshot
           └─ MCP "playwright"    src-tauri/src/browser.rs → persistent local HTTP server
+
+ Usage · src-tauri/src/usage.rs
+        claude -p "/usage" every 4 min ──► usage-updated to the widget (src/usage)
 ```
 
 ---
@@ -284,8 +300,10 @@ npm run dev             # just the interface, in a browser
 - **Settings demo**: <http://127.0.0.1:1420/settings.html?demo>.
 - **README banner**: <http://127.0.0.1:1420/dev/banner.html>.
 - **File drop demo**: <http://127.0.0.1:1420/dev/upload-preview.html>.
+- **Usage demo**: <http://127.0.0.1:1420/?demo=usage> (the `/usage` card) and
+  <http://127.0.0.1:1420/usage.html?open> (the widget).
 - **Tests**: `cargo test -p tako-hook --release` (relay, agent guard, MCP server) and `cargo test -p tako --lib`
-  (hooks, files, settings).
+  (hooks, files, settings, `/usage` parsing, widget placement).
 - **Icons**: `npm run icons` redraws `src-tauri/icons` from `scripts/gen-icons.mjs`.
 - **Log**: `%LOCALAPPDATA%\Tako\tako.log` — hook events, decisions, tool result shapes (keys only), drags, browser,
   chat errors. It stays on your machine.
@@ -307,8 +325,11 @@ src/                      island front end (TypeScript, no framework)
   mascot/                 the character and the opening animation (Canvas 2D)
     look.ts               the character's shape and colours
   settings/               the settings window
+  usage/                  the usage widget
 src-tauri/src/            Rust backend
   claude_cli.rs           chat through the user's Claude Code
+  usage.rs                Claude Code's /usage, read and cached
+  widget.rs               the widget window: spots, drag, snap
   browser.rs              the agent's persistent Playwright server
   updater.rs              signed updates from GitHub releases
   pipe.rs                 named pipe, permissions, agent actions
@@ -334,10 +355,10 @@ docs/                     banner, GIF and screenshots
 - [x] Persistent browser agent with a guard and an auto mode
 - [x] Full settings, integration logos, signed auto-updates
 - [x] Tako's own character, icon and sounds
+- [x] **Usage widget**: the 5-hour and weekly limits on screen, draggable, and `/usage` in the chat
 - [ ] English settings window
 - [ ] **Multi-session**: one pill per Claude Code terminal
 - [ ] **Missions**: start a full Claude Code task from the island
-- [ ] **Usage meter**: the 5-hour and weekly limits (already in `/usage`)
 - [ ] **Game mode**: nothing opens over a full-screen game
 - [ ] **Server monitoring**: up / down, CPU, RAM, disk, containers
 - [ ] **Session guardrails**: block dangerous commands, flag access to secrets

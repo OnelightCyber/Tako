@@ -693,7 +693,8 @@ export class Island {
       ? settling
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive;
+        greetingActive || this.engine.busy || UploadSeq.isActive ||
+        this.views.get(State.view)?.animating?.() === true;
 
     if (busy) {
       requestAnimationFrame(this.frame);
@@ -807,7 +808,7 @@ export class Island {
     const greetingActive = expanded && State.view === "greeting";
 
     this.contentEl.style.opacity = expanded && !greetingActive ? "1" : "0";
-    this.contentEl.style.pointerEvents = expanded && !greetingActive ? "auto" : "none";
+    this.contentEl.classList.toggle("interactive", expanded && !greetingActive);
     this.greetingCanvas.style.display = greetingActive ? "block" : "none";
 
     this.header.sync();

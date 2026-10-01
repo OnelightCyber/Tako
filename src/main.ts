@@ -71,7 +71,10 @@ async function main() {
 
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
-    if (import.meta.env.DEV && location.search.includes("demo")) {
+    if (import.meta.env.DEV && location.search.includes("demo=usage")) {
+      const { runUsageDemo } = await import("../dev/usage-demo");
+      runUsageDemo(island);
+    } else if (import.meta.env.DEV && location.search.includes("demo")) {
       const { runSessionDemo } = await import("../dev/session-demo");
       runSessionDemo(island);
     }

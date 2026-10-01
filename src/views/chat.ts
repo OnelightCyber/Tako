@@ -2,10 +2,11 @@ import { h, svg, clear } from "./dom";
 import { ICONS } from "./icons";
 import { proIcon } from "./pro-icons";
 import { contentHeight, islandBox, setSizeHint } from "./fit";
-import { Bridge, onEvent, type ChatContext } from "../core/bridge";
+import { Bridge, onEvent, type ChatContext, type UsageReport } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { State, type ChatMessage } from "../core/state";
 import type { ViewHost } from "./views";
+import { countdown, fetchUsage, longLabel, mainLines, ring, tone, usageError } from "../usage/gauge";
 
 let nextId = 1;
 
@@ -37,7 +38,10 @@ const SKILLS: Record<string, string> = {
   design: "Créer un design",
 };
 
-const LOCAL: Command[] = [{ name: "clear", desc: "Vider la conversation", kind: "local" }];
+const LOCAL: Command[] = [
+  { name: "clear", desc: "Vider la conversation", kind: "local" },
+  { name: "usage", desc: "Tes limites Claude : session et semaine", kind: "local" },
+];
 
 let catalog: Command[] = [...LOCAL];
 let catalogLoaded = false;
@@ -56,17 +60,102 @@ async function loadCatalog() {
   const skills = new Set(found.skills ?? []);
   const list: Command[] = [...LOCAL];
   for (const name of found.commands ?? []) {
+    if (LOCAL.some((c) => c.name === name)) continue;
     if (skills.has(name)) list.push({ name, desc: SKILLS[name] ?? "Skill Claude Code", kind: "skill" });
     else if (BUILTINS[name]) list.push({ name, desc: BUILTINS[name], kind: "builtin" });
   }
   catalog = list;
 }
 
-function bubble(message: ChatMessage): HTMLElement {
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = h("textarea", { style: "position:fixed;left:-9999px;top:0" }) as HTMLTextAreaElement;
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
+}
+
+function copyButton(text: string): HTMLElement {
+  const btn = h("button", { class: "copy-btn", title: "Copy" }, proIcon("file", 12, 2));
+  btn.addEventListener("mousedown", (e) => e.stopPropagation());
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!(await copyText(text))) return;
+    btn.classList.add("done");
+    btn.replaceChildren(proIcon("check", 12, 2.4));
+    window.setTimeout(() => {
+      btn.classList.remove("done");
+      btn.replaceChildren(proIcon("file", 12, 2));
+    }, 1400);
+  });
+  return btn;
+}
+
+function usageText(report: UsageReport): string {
+  if (report.lines.length === 0) return usageError(report.error);
+  return report.lines
+    .map((l) => `${longLabel(l.label)} : ${l.percent} %${l.resets ? ` (reset dans ${countdown(l.resets)})` : ""}`)
+    .join("\n");
+}
+
+function usageCard(report: UsageReport): HTMLElement {
+  const card = h("div", { class: "usage-card" });
+  card.append(
+    h("div", { class: "uc-head" }, proIcon("gauge", 14, 2), h("b", { text: "Utilisation Claude" }),
+      report.subscription ? h("span", { class: "uc-plan", text: "Abonnement" }) : null),
+  );
+  if (report.lines.length === 0) {
+    card.append(h("div", { class: "uc-empty", text: usageError(report.error) }));
+    return card;
+  }
+  const main = mainLines(report.lines);
+  const rings = h("div", { class: "uc-rings" });
+  for (const line of main) {
+    rings.append(
+      h("div", { class: "uc-ring" },
+        h("div", { class: "uc-gauge" }, ring(line.percent, 50, 5), h("b", { text: `${line.percent}%`, style: `color:${tone(line.percent)}` })),
+        h("div", { class: "uc-meta" },
+          h("span", { class: "uc-label", text: longLabel(line.label) }),
+          line.resets ? h("span", { class: "uc-reset" }, proIcon("clock", 11, 2.2), h("span", { text: `reset dans ${countdown(line.resets)}` })) : null),
+      ),
+    );
+  }
+  card.append(rings);
+  const rest = report.lines.filter((l) => !main.includes(l));
+  if (rest.length > 0) {
+    const rows = h("div", { class: "uc-rows" });
+    for (const line of rest) {
+      rows.append(
+        h("div", { class: "uc-row" },
+          h("span", { text: longLabel(line.label) }),
+          h("div", { class: "uc-bar" }, h("i", { style: `width:${line.percent}%;background:${tone(line.percent)}` })),
+          h("b", { text: `${line.percent}%` })),
+      );
+    }
+    card.append(rows);
+  }
+  return card;
+}
+
+function bubble(message: ChatMessage, live = false): HTMLElement {
+  if (message.usage) {
+    const card = usageCard(message.usage);
+    card.append(copyButton(message.content));
+    return h("div", { class: "chat-row" }, card);
+  }
   if (message.role === "user") {
     return h("div", { class: "chat-row user" }, h("div", { class: "bubble", text: message.content }));
   }
-  return h("div", { class: "chat-row" }, h("div", { class: "reply", text: message.content }));
+  const reply = h("div", { class: "reply", text: message.content });
+  if (!live) reply.append(copyButton(message.content));
+  return h("div", { class: "chat-row" }, reply);
 }
 
 function typingDots(status: string): HTMLElement {
@@ -182,6 +271,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       clearConversation();
       return;
     }
+    if (query === "/usage") {
+      input.value = "";
+      renderMenu();
+      await showUsage(query);
+      return;
+    }
     input.value = "";
     renderMenu();
     sending = true;
@@ -216,6 +311,27 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       onHeightChange();
       input.focus();
     }
+  }
+
+  async function showUsage(query: string) {
+    sending = true;
+    Sound.play("send");
+    State.chatHistory.push({ id: nextId++, role: "user", content: query });
+    State.chatPartial = "";
+    State.chatStatus = "Lecture de tes limites…";
+    State.stateOverride = "thinking";
+    State.notify();
+    onHeightChange();
+    const report = await fetchUsage(true);
+    if (report) State.chatHistory.push({ id: nextId++, role: "assistant", content: usageText(report), usage: report });
+    else State.chatHistory.push({ id: nextId++, role: "assistant", content: "Utilisation indisponible ici." });
+    State.stateOverride = null;
+    State.chatStatus = "";
+    sending = false;
+    Sound.play("finish");
+    State.notify();
+    onHeightChange();
+    input.focus();
   }
 
   void onEvent<string>("chat-delta", (text) => {
@@ -284,7 +400,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         clear(log);
         for (const m of State.chatHistory) log.append(bubble(m));
         if (thinking && State.chatPartial) {
-          log.append(bubble({ id: 0, role: "assistant", content: State.chatPartial }));
+          log.append(bubble({ id: 0, role: "assistant", content: State.chatPartial }, true));
         } else if (thinking) {
           log.append(typingDots(State.chatStatus));
         }

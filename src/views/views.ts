@@ -32,6 +32,8 @@ export interface ViewHost {
   focus?(): void;
 
   tick?(nowMs: number): void;
+
+  animating?(): boolean;
 }
 
 function card(wash: Wash, ...children: (Node | string)[]): HTMLElement {
@@ -160,6 +162,9 @@ function buildOverview(actions: ViewActions): ViewHost {
     el,
     tick(nowMs: number) {
       if (mode === "ticker") ticker.tick(nowMs);
+    },
+    animating() {
+      return mode === "ticker" && ticker.animating;
     },
     sync() {
       const task = State.focusTask;

@@ -1,11 +1,13 @@
 import "./settings.css";
-import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import { Bridge, onEvent, type HookStatus, type UsageReport } from "../core/bridge";
 import { Sound } from "../core/sound";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
 import { proIcon, type ProIconName } from "../views/pro-icons";
 import { brandLogo } from "../views/brand-logos";
 import { blob } from "./blob";
+import { closeDropdowns, dropdown, type Choice } from "./dropdown";
+import { countdown, fetchUsage, longLabel, tone, usageError } from "../usage/gauge";
 
 type PageId = "home" | "claude" | "chat" | "integrations" | "island" | "about";
 
@@ -59,10 +61,15 @@ const INTEGRATIONS: IntegrationDef[] = [
 
 const MAX_ACTIVE = 4;
 
-const MODELS: [string, string][] = [
-  ["claude-opus-5-5", "Claude Opus 5.5"],
-  ["claude-sonnet-5-5", "Claude Sonnet 5.5"],
-  ["claude-haiku-4-5", "Claude Haiku 4.5"],
+const MODELS: Choice<string>[] = [
+  { value: "claude-opus-5-5", label: "Claude Opus 5.5", hint: "Le plus capable" },
+  { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", hint: "Rapide et polyvalent" },
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", hint: "Le plus rapide, le moins cher" },
+];
+
+const SCREENS: Choice<Settings["screen"]>[] = [
+  { value: "primary", label: "Écran principal", hint: "Toujours au même endroit", icon: "monitor" },
+  { value: "cursor", label: "Écran sous la souris", hint: "Suit ta souris d'un écran à l'autre", icon: "eye" },
 ];
 
 const root = document.getElementById("settings-root")!;
@@ -179,6 +186,7 @@ function renderFoot() {
 }
 
 function go(id: PageId) {
+  closeDropdowns();
   current = id;
   renderNav();
   clear(pageHost);
@@ -437,11 +445,10 @@ function chatPage(): Node[] {
       toast(`Impossible : ${String(err)}`, "err");
     }
   });
-  const model = h("select", {}) as HTMLSelectElement;
-  for (const [id, label] of MODELS) model.append(h("option", { value: id, text: label }));
-  if (!MODELS.some(([id]) => id === ctx.settings.model)) model.append(h("option", { value: ctx.settings.model, text: ctx.settings.model }));
-  model.value = ctx.settings.model;
-  model.addEventListener("change", () => { ctx.settings.model = model.value; void save(); });
+  const models = MODELS.some((m) => m.value === ctx.settings.model)
+    ? MODELS
+    : [...MODELS, { value: ctx.settings.model, label: ctx.settings.model }];
+  const model = dropdown(models, ctx.settings.model, (v) => { ctx.settings.model = v; void save(); });
 
   const api = card(
     cardHead("Clé API (secours)", pill(ctx.hasKey, ctx.hasKey ? "Enregistrée" : "Aucune"), "key"),
@@ -554,10 +561,7 @@ function islandPage(): Node[] {
   auto.addEventListener("input", setAutoLabel);
   auto.addEventListener("change", () => { ctx.settings.autoCloseInterval = Number(auto.value); void save(); });
 
-  const screen = h("select", {}) as HTMLSelectElement;
-  screen.append(h("option", { value: "primary", text: "Écran principal" }), h("option", { value: "cursor", text: "Écran sous la souris" }));
-  screen.value = ctx.settings.screen;
-  screen.addEventListener("change", () => { ctx.settings.screen = screen.value as Settings["screen"]; void save(); });
+  const screen = dropdown(SCREENS, ctx.settings.screen, (v) => { ctx.settings.screen = v; void save(); });
 
   return [
     pageHeader("Îlot & sons", "Comment Tako se montre, et comment il sonne."),
@@ -573,7 +577,72 @@ function islandPage(): Node[] {
       row("Afficher sur", null, screen, "monitor"),
       row("Lancer au démarrage de Windows", null, toggle(ctx.settings.autostart, (v) => { ctx.settings.autostart = v; void save(); }), "bolt"),
     ),
+    usageWidgetCard(),
   ];
+}
+
+const USAGE_SPOTS: [Settings["usagePosition"], string][] = [
+  ["corner-left", "Coin gauche"],
+  ["island-left", "Gauche de l'îlot"],
+  ["island-right", "Droite de l'îlot"],
+  ["corner-right", "Coin droit"],
+];
+
+let usageCardEl: HTMLElement | null = null;
+
+function usageKey(): string {
+  return `${ctx.settings.usageWidget}~${ctx.settings.usagePosition}`;
+}
+
+function usageWidgetCard(): HTMLElement {
+  const preview = h("div", { class: "usage-preview" }, h("span", { class: "muted small", text: "Lecture de /usage…" }));
+  const fill = (r: UsageReport | null) => {
+    clear(preview);
+    if (!r || r.lines.length === 0) {
+      preview.append(h("span", { class: "muted small", text: r ? usageError(r.error) : "Disponible dans l'app Tako." }));
+      return;
+    }
+    for (const line of r.lines) {
+      preview.append(
+        h("div", { class: "up-row" },
+          h("div", { class: "up-top" }, h("span", { text: longLabel(line.label) }), h("b", { text: `${line.percent} %` })),
+          h("div", { class: "up-bar" }, h("i", { style: `width:${line.percent}%;background:${tone(line.percent)}` })),
+          line.resets ? h("div", { class: "up-sub", text: `Reset dans ${countdown(line.resets)}` }) : null),
+      );
+    }
+  };
+  void fetchUsage(false).then(fill);
+
+  const spots = h("div", { class: "spots" });
+  for (const [id, label] of USAGE_SPOTS) {
+    const b = h("button", { class: `spot${ctx.settings.usagePosition === id ? " on" : ""}`, title: label },
+      h("div", { class: `spot-screen ${id}` }, h("i", { class: "spot-island" }), h("i", { class: "spot-widget" })),
+      h("span", { text: label }));
+    b.addEventListener("click", () => {
+      ctx.settings.usagePosition = id;
+      for (const el of Array.from(spots.children)) el.classList.toggle("on", el === b);
+      void save("Position enregistrée");
+    });
+    spots.append(b);
+  }
+  spots.classList.toggle("disabled", !ctx.settings.usageWidget);
+
+  const free = ctx.settings.usagePosition === "custom";
+  usageCardEl = card(
+    cardHead("Widget d'utilisation", free ? pill(true, "Position libre") : undefined, "gauge"),
+    h("p", { class: "muted", text: "Tes limites Claude toujours en haut de l'écran : session de 5 h et semaine. Survole-le pour le détail, ou tape /usage dans le chat." }),
+    row("Afficher le widget", null, toggle(ctx.settings.usageWidget, (v) => {
+      ctx.settings.usageWidget = v;
+      spots.classList.toggle("disabled", !v);
+      void save(v ? "Widget affiché" : "Widget masqué");
+    }), "eye"),
+    h("div", { class: "spots-wrap" },
+      h("div", { class: "row-title", text: "Position" }),
+      spots,
+      h("p", { class: "muted small", text: "Ou attrape le widget et glisse-le où tu veux. Clic droit dessus pour le masquer." })),
+    preview,
+  );
+  return usageCardEl;
 }
 
 function updatesCard(): HTMLElement {
@@ -706,7 +775,9 @@ async function main() {
   go(PAGES.some((p) => p.id === wanted) ? (wanted as PageId) : "home");
 
   void onEvent<Settings>("settings-changed", (s) => {
+    const before = usageKey();
     ctx.settings = { ...ctx.settings, ...s };
+    if (usageKey() !== before && usageCardEl?.isConnected) usageCardEl.replaceWith(usageWidgetCard());
   });
   void onEvent<{ version: string; current: string; notes: string }>("update-available", (info) => {
     pendingUpdate = info;

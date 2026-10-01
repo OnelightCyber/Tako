@@ -63,7 +63,10 @@ function stepLabel(tool: string, input: Record<string, unknown>): string {
   const label = TOOL_LABELS[tool] ?? tool;
   const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : null);
   const cmd = str("command");
-  if (cmd) return `${label} · ${cmd.slice(0, 40)}`;
+  if (cmd) {
+    const shown = str("description")?.trim() || cmd.trim().split(/\r?\n/)[0].replace(/\s+/g, " ");
+    return `${label} · ${shown.slice(0, 60)}`;
+  }
   const path = str("path");
   if (path) return `${label} · ${lastPathComponent(path)}`;
   const file = str("file_path");

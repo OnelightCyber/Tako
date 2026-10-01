@@ -42,6 +42,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Tako ${{ github.ref_name }}
           releaseBody: |
+            Install `Tako_*_x64-setup.exe`. Copies already installed update themselves.
+
             Installe `Tako_*_x64-setup.exe`. Les versions déjà installées se mettent à jour toutes seules.
           releaseDraft: false
           prerelease: false

@@ -69,6 +69,10 @@ export const Bridge = {
   claudeCodeInfo: () => call<{ found: boolean; path: string; version: string }>("claude_code_info"),
   openTakoFolder: () => call<void>("open_tako_folder"),
   showIsland: () => call<void>("show_island"),
+  usageGet: (force: boolean) => call<UsageReport>("usage_get", { force }),
+  usageResize: (width: number, height: number) => call<void>("usage_resize", { width, height }),
+  usageDrag: () => call<void>("usage_drag"),
+  usageClose: () => call<void>("usage_close"),
   updateCheck: () => callOrThrow<{ version: string; current: string; notes: string } | null>("update_check"),
   updateInstall: () => callOrThrow<void>("update_install"),
   chatCommands: () => call<{ commands: string[]; skills: string[]; usage?: string }>("chat_commands"),
@@ -105,6 +109,19 @@ export interface DroppedFile {
   name: string;
   path: string;
   size: number;
+}
+
+export interface UsageLine {
+  label: string;
+  percent: number;
+  resets: string;
+}
+
+export interface UsageReport {
+  lines: UsageLine[];
+  subscription: boolean;
+  fetchedAt: number;
+  error?: string | null;
 }
 
 export interface HookStatus {

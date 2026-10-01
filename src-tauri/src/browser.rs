@@ -37,7 +37,9 @@ impl Browser {
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", "npx", "-y", "@playwright/mcp@latest", "--port"])
             .arg(port.to_string())
-            .args(["--host", "127.0.0.1", "--shared-browser-context", "--config"])
+            .args(["--host", "127.0.0.1", "--allowed-hosts"])
+            .arg(format!("127.0.0.1:{port}"))
+            .args(["--shared-browser-context", "--config"])
             .arg(&config)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

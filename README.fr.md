@@ -94,6 +94,14 @@ remplit des formulaires. Le navigateur **reste ouvert** entre les messages, avec
 chaque action qui agit — ouvrir une page, cliquer, taper, exécuter du JavaScript — t'est demandée dans l'îlot avec
 l'URL ou le texte exact ; le **mode auto** laisse tout passer.
 
+### Widget d'utilisation
+
+Tes limites Claude toujours sous les yeux : un petit widget en haut de l'écran, un anneau pour la session de 5 h,
+un pour la semaine, et le temps avant le reset. Survole-le pour toutes les limites (tous modèles, par modèle).
+**Glisse-le où tu veux** — il s'aimante au bord haut et à côté de l'îlot — ou choisis sa place dans les réglages ;
+un clic droit le masque. Tape `/usage` dans le chat pour les mêmes chiffres en carte. Ils viennent du `/usage` de
+ton propre Claude Code, rafraîchis toutes les 4 minutes.
+
 ### Et aussi
 
 - **Dépôt de fichiers** : glisse un fichier sur l'îlot, il arrive dans le chat. L'îlot caché se réveille quand un
@@ -123,7 +131,12 @@ l'URL ou le texte exact ; le **mode auto** laisse tout passer.
 <td><img src="docs/screenshots/settings-chat.png" alt="Réglages, chat"><br><sub>Chat, vision de l'écran et agent navigateur</sub></td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="docs/screenshots/settings-integrations.png" alt="Intégrations" width="70%"><br><sub>Les intégrations</sub></td>
+<td><img src="docs/screenshots/usage-chat.png" alt="/usage dans le chat"><br><sub><code>/usage</code> dans le chat</sub></td>
+<td align="center"><img src="docs/screenshots/usage-widget.png" alt="Widget d'utilisation" width="250"><br><sub>Le widget d'utilisation, survolé</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/settings-usage.png" alt="Réglages du widget"><br><sub>La place du widget — ou glisse-le</sub></td>
+<td><img src="docs/screenshots/settings-integrations.png" alt="Intégrations"><br><sub>Les intégrations</sub></td>
 </tr>
 </table>
 
@@ -271,6 +284,9 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
         claude -p (stream-json) ──► chat-delta / chat-status vers l'îlot
           ├─ MCP « tako »        tako-hook.exe mcp → screenshot
           └─ MCP « playwright »  src-tauri/src/browser.rs → serveur HTTP local persistant
+
+ Utilisation · src-tauri/src/usage.rs
+        claude -p "/usage" toutes les 4 min ──► usage-updated vers le widget (src/usage)
 ```
 
 ---
@@ -287,8 +303,10 @@ npm run dev             # juste l'interface dans un navigateur
 - **Réglages de démo** : <http://127.0.0.1:1420/settings.html?demo>.
 - **Bannière du README** : <http://127.0.0.1:1420/dev/banner.html>.
 - **Démo du dépôt de fichiers** : <http://127.0.0.1:1420/dev/upload-preview.html>.
+- **Démo de l'utilisation** : <http://127.0.0.1:1420/?demo=usage> (la carte `/usage`) et
+  <http://127.0.0.1:1420/usage.html?open> (le widget).
 - **Tests** : `cargo test -p tako-hook --release` (relais, garde-fou de l'agent, serveur MCP) et
-  `cargo test -p tako --lib` (hooks, fichiers, réglages).
+  `cargo test -p tako --lib` (hooks, fichiers, réglages, lecture de `/usage`, placement du widget).
 - **Icônes** : `npm run icons` les redessine depuis `scripts/gen-icons.mjs`.
 - **Log** : `%LOCALAPPDATA%\Tako\tako.log` — événements des hooks, décisions, forme des résultats d'outils (clés
   seulement), drags, navigateur, erreurs du chat. Il reste sur ta machine.
@@ -310,8 +328,11 @@ src/                      interface de l'îlot (TypeScript, sans framework)
   mascot/                 le personnage et l'animation d'accueil (Canvas 2D)
     look.ts               la forme et les couleurs du personnage
   settings/               la fenêtre de réglages
+  usage/                  le widget d'utilisation
 src-tauri/src/            backend Rust
   claude_cli.rs           chat via le Claude Code de l'utilisateur
+  usage.rs                le /usage de Claude Code, lu et mis en cache
+  widget.rs               la fenêtre du widget : places, drag, aimantation
   browser.rs              serveur Playwright persistant de l'agent
   updater.rs              mises à jour signées depuis les releases GitHub
   pipe.rs                 pipe nommé, permissions, actions d'agent
@@ -337,10 +358,10 @@ docs/                     bannière, GIF et captures
 - [x] Agent navigateur persistant, avec garde-fou et mode auto
 - [x] Réglages complets, logos des intégrations, mises à jour signées
 - [x] Personnage, icône et sons propres à Tako
+- [x] **Widget d'utilisation** : limites de 5 h et de la semaine à l'écran, déplaçable, et `/usage` dans le chat
 - [ ] Réglages en anglais
 - [ ] **Multi-sessions** : une pastille par terminal Claude Code
 - [ ] **Missions** : lancer une tâche Claude Code complète depuis l'îlot
-- [ ] **Compteur de limite** : la limite de 5 h et de la semaine (déjà dans `/usage`)
 - [ ] **Mode jeu** : rien ne s'ouvre pendant un jeu en plein écran
 - [ ] **Monitoring serveurs** : up / down, CPU, RAM, disque, conteneurs
 - [ ] **Garde-fous de session** : bloquer les commandes dangereuses, signaler l'accès aux secrets

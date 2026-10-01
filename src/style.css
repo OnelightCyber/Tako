@@ -123,6 +123,18 @@ body {
   transition: opacity 0.22s ease-in-out;
 }
 
+#content {
+  pointer-events: none;
+}
+
+#content.interactive > * {
+  pointer-events: auto;
+}
+
+#content.interactive > #views.hidden-by-upload {
+  pointer-events: none;
+}
+
 #bot-glow {
   position: absolute;
   pointer-events: none;
@@ -446,6 +458,7 @@ body {
 }
 
 .ticker-row .tick-text {
+  display: block;
   font: 500 13px var(--font);
   white-space: nowrap;
   overflow: hidden;

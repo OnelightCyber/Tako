@@ -11,7 +11,8 @@ if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
   process.exit(1);
 }
 
-const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
+const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit" });
+const npm = (args) => execFileSync(process.platform === "win32" ? "npm.cmd" : "npm", args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
 
 const status = execFileSync("git", ["status", "--porcelain"], { cwd: root }).toString().trim();
 if (status) {
@@ -28,7 +29,7 @@ edit("package.json", (s) => s.replace(/"version": "[^"]+"/, `"version": "${versi
 edit("src-tauri/tauri.conf.json", (s) => s.replace(/"version": "[^"]+"/, `"version": "${version}"`));
 edit("Cargo.toml", (s) => s.replace(/(\[workspace\.package\][^[]*?version = )"[^"]+"/, `$1"${version}"`));
 
-run("npm", ["install", "--package-lock-only", "--no-audit", "--no-fund"]);
+npm(["install", "--package-lock-only", "--no-audit", "--no-fund"]);
 run("cargo", ["update", "-p", "tako", "-p", "tako-hook", "--offline"]);
 
 run("git", ["add", "package.json", "package-lock.json", "src-tauri/tauri.conf.json", "Cargo.toml", "Cargo.lock"]);
