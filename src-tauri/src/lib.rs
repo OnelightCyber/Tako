@@ -1,3 +1,4 @@
+mod assets;
 mod audio;
 mod bluetooth;
 mod browser;
@@ -14,6 +15,7 @@ mod island;
 mod keys;
 mod log;
 mod media;
+mod mic;
 mod network;
 mod notify;
 mod pipe;
@@ -22,8 +24,10 @@ mod privacy;
 mod secrets;
 mod sessions;
 mod settings;
+mod stt;
 mod sysstats;
 mod tray;
+mod tts;
 mod updater;
 mod usage;
 mod voice;
@@ -131,6 +135,12 @@ fn apply_features(app: &AppHandle, settings: &Settings) {
     notify::configure(settings.notifications_enabled, settings.notifications_private, &settings.notifications_muted);
     weather::configure(settings.weather_enabled, &settings.weather_city);
     voice::set_enabled(settings.voice_enabled);
+    if settings.voice_enabled {
+        stt::start_download(app.clone());
+        if settings.voice_replies && settings.voice_name != "windows" {
+            tts::start_download(app.clone(), &settings.voice_name);
+        }
+    }
     clipboard::set_enabled(settings.lens_enabled);
     register_hotkey(app, &settings.mission_hotkey);
 }
@@ -171,8 +181,34 @@ fn voice_listen() {
 }
 
 #[tauri::command]
-async fn voice_say(text: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || voice::say(&text)).await.map_err(|e| e.to_string())?
+fn voice_cancel() {
+    voice::cancel();
+}
+
+#[tauri::command]
+fn stt_status() -> stt::Status {
+    stt::status()
+}
+
+#[tauri::command]
+fn stt_download(app: AppHandle) {
+    stt::start_download(app);
+}
+
+#[tauri::command]
+async fn voice_say(shared: State<'_, Shared>, text: String) -> Result<String, String> {
+    let name = shared.settings.lock().unwrap().voice_name.clone();
+    tauri::async_runtime::spawn_blocking(move || voice::say(&text, &name)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn tts_status(voice: String) -> tts::Status {
+    tts::status(&voice)
+}
+
+#[tauri::command]
+fn tts_download(app: AppHandle, voice: String) {
+    tts::start_download(app, &voice);
 }
 
 #[tauri::command]
@@ -789,6 +825,11 @@ pub fn run() {
             weather_refresh,
             weather_failure,
             voice_listen,
+            voice_cancel,
+            stt_status,
+            stt_download,
+            tts_status,
+            tts_download,
             voice_say,
             drive_open,
             download_open,

@@ -102,6 +102,8 @@ pub struct Settings {
     pub voice_enabled: bool,
     #[serde(default = "default_true")]
     pub voice_replies: bool,
+    #[serde(default = "default_voice")]
+    pub voice_name: String,
     #[serde(default)]
     pub voice_approvals: bool,
     #[serde(default = "default_true")]
@@ -208,6 +210,7 @@ impl Default for Settings {
             visualizer: true,
             voice_enabled: false,
             voice_replies: true,
+            voice_name: default_voice(),
             voice_approvals: false,
             lens_enabled: true,
             mascot_alive: true,
@@ -221,6 +224,10 @@ pub fn config_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("Tako")
+}
+
+fn default_voice() -> String {
+    "siwis".into()
 }
 
 pub fn local_dir() -> PathBuf {

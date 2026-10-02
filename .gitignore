@@ -10,3 +10,4 @@ src-tauri/gen/schemas/
 .env.*
 !.env.example
 .playwright-mcp/
+tools/libclang/

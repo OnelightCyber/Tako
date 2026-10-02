@@ -164,8 +164,13 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
 ### Tako as Jarvis
 
 - **"Hey Tako"**: say it and the island opens, the character tilts its head and listens, with bars that follow your
-  voice. Ask your question out loud: Claude answers through your own Claude Code account and Tako reads the answer
-  with Windows' French voice. "Tako, stop" cuts it short.
+  voice and the words appearing as you speak. Ask your question out loud: Claude answers through your own Claude
+  Code account and Tako reads the answer with a natural voice. "Tako, stop" cuts it short.
+- **Natural voices**: Siwis, Pierre or Jessica, neural voices from [Piper](https://github.com/rhasspy/piper) that run
+  on your PC (about 85 MB, downloaded once). Windows' own voice stays available.
+- **Your voice stays on your PC**: Windows spots "Hey Tako", then [Whisper](https://github.com/ggml-org/whisper.cpp)
+  transcribes your question locally in about half a second. The speech model (190 MB) is downloaded once and checked
+  against its SHA-256.
 - **Instant answers**: the time, the date, the weather, "set a timer for 10 minutes", "pause", "next song" — answered
   right away, without Claude.
 - **Voice approvals** (opt-in): "Tako, oui" allows and "Tako, non" denies the permission on screen. A "yes" only
@@ -365,8 +370,8 @@ exactly what happens here: everyone uses their own account, on their own machine
 - **Secrets** live in the Windows Credential Manager (service `dev.tako.island`); the interface can only ask whether
   a key exists.
 - **No telemetry.** Network requests only go to the services you set up, and to Claude through your own Claude Code.
-  The "Hey Tako" wake word is recognised on your PC; your spoken question goes through Windows dictation (Microsoft's
-  online speech recognition) only when you turn the voice assistant on.
+  Your voice never leaves your PC: the wake word and the transcription both run locally, and only the written
+  question goes to Claude. The speech model is fetched once from Hugging Face, checked against its SHA-256.
 - **The Lens reads, never sends**: copied text is classified locally; it only goes to Claude, a carrier or Google
   Maps when you click an action, and password managers' copies are skipped.
 - **Nothing is injected as HTML**: code from your files is built node by node, never through `innerHTML`.
@@ -416,6 +421,11 @@ npm run tauri dev       # the whole app, hot reload
 npm run dev             # just the interface, in a browser
 ```
 
+- **Building**: Whisper is compiled from source, so you need CMake and libclang. Install LLVM
+  (`winget install LLVM.LLVM`) or drop `libclang.dll` into `tools/libclang/`; `.cargo/config.toml` turns on the
+  `/O2` optimisations that cmake-rs leaves out with MSVC.
+- **Island demos**: <http://127.0.0.1:1420/?alive=glance> (also `session`, `lens-error`, `lens-address`,
+  `lens-tracking`, `lens-english`, `voice-listen`, `voice-think`, `voice-answer`, `voice-fail`).
 - **Live view demo**: `npm run dev`, then <http://127.0.0.1:1420/?demo> (add `&until=plan|read|edit|diff|shell` to
   stop at a step).
 - **Settings demo**: <http://127.0.0.1:1420/settings.html?demo>.
@@ -456,7 +466,9 @@ src-tauri/src/            Rust backend
   widget.rs               the widget window: spots, drag, snap
   sessions.rs             context, turn summary, undo, commit, diff, missions
   media.rs                what's playing (Windows media sessions)
-  voice.rs                "Hey Tako", dictation and Windows' voice
+  voice.rs                "Hey Tako", listening, answers read aloud
+  tts.rs, assets.rs       Piper natural voices, verified downloads
+  mic.rs, stt.rs          microphone capture, end of speech, local Whisper
   clipboard.rs            the Lens: what you copy, recognised locally
   sysstats.rs             CPU, memory, GPU
   browser.rs              the agent's persistent Playwright server

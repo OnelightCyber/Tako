@@ -171,6 +171,7 @@ export interface Settings {
   visualizer: boolean;
   voiceEnabled: boolean;
   voiceReplies: boolean;
+  voiceName: string;
   voiceApprovals: boolean;
   lensEnabled: boolean;
   mascotAlive: boolean;
@@ -232,6 +233,7 @@ export const DEFAULT_SETTINGS: Settings = {
   visualizer: true,
   voiceEnabled: false,
   voiceReplies: true,
+  voiceName: "siwis",
   voiceApprovals: false,
   lensEnabled: true,
   mascotAlive: true,

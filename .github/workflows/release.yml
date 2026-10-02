@@ -29,6 +29,12 @@ jobs:
         with:
           workspaces: ". -> target"
 
+      - name: libclang for Whisper
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) { choco install llvm -y --no-progress }
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+
       - run: npm ci
 
       - run: cargo test -p tako-hook --release

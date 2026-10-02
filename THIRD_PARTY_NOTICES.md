@@ -46,3 +46,21 @@ show which service an integration connects to.
   `npx` when the browser agent is turned on.
 - [Claude Code](https://code.claude.com) is not bundled: the chat runs the copy the user installed and signed in
   to. Claude and Claude Code are trademarks of Anthropic; Tako is not made or endorsed by Anthropic.
+
+## Voice
+
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) is compiled into Tako through the
+  [whisper-rs](https://codeberg.org/tazz4843/whisper-rs) crate (Unlicense). whisper.cpp and ggml are released under
+  the MIT License, Copyright (c) 2023-2024 The ggml authors.
+- The speech recognition model (`ggml-small-q5_1.bin`, OpenAI Whisper weights converted by the whisper.cpp
+  project, MIT) is not bundled: Tako downloads it from Hugging Face when the voice assistant is turned on and checks
+  its SHA-256.
+- [Piper](https://github.com/rhasspy/piper) (MIT) is not bundled: Tako downloads its official Windows release when
+  a natural voice is chosen and checks its SHA-256. That release includes
+  [espeak-ng](https://github.com/espeak-ng/espeak-ng) (GPL-3.0) and [ONNX Runtime](https://onnxruntime.ai) (MIT),
+  which Tako runs as a separate program and never links.
+- Voices, downloaded on demand from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices):
+  - Siwis: trained on the [SIWIS French Speech Synthesis Database](https://datashare.is.ed.ac.uk/handle/10283/2353),
+    CC BY 4.0.
+  - Pierre and Jessica: trained on the [UPMC voice data](https://github.com/marytts/upmc-pierre-data) from the
+    MaryTTS project, CC BY-SA 4.0.

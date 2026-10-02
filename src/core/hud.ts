@@ -208,3 +208,10 @@ export function temp(value: number): string {
   const r = Math.round(value);
   return `${r < 0 ? "−" : ""}${Math.abs(r)}°`;
 }
+
+const SHORT_DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const SHORT_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+
+export function shortDate(d: Date): string {
+  return `${SHORT_DAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`;
+}

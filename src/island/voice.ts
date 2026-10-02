@@ -29,6 +29,7 @@ let ctx: AudioContext | null = null;
 let source: AudioBufferSourceNode | null = null;
 let resumeMusic = false;
 let lastWake = 0;
+let awaiting = false;
 
 export function plain(text: string): string {
   return text
@@ -84,7 +85,7 @@ export function localIntent(raw: string): Local | null {
   const t = fold(raw);
   if (!t) return null;
   if (/^(rien|annule|laisse tomber|non rien|c est bon|oublie|stop|tais toi)$/.test(t)) return { say: "" };
-  if (t.length < 40 && /\bquelle heure\b|^l heure$|^il est quelle heure/.test(t)) return { say: `Il est ${clock()}.` };
+  if (t.length < 40 && /\bquel(le)?s? heures?\b|^l heure$/.test(t)) return { say: `Il est ${clock()}.` };
   if (t.length < 45 && /\bquel jour\b|\bquelle date\b|\bon est le combien\b|\bla date\b/.test(t)) {
     const d = new Date();
     return { say: `On est ${DAYS[d.getDay()]} ${d.getDate() === 1 ? "1er" : d.getDate()} ${MONTHS[d.getMonth()]}.` };
@@ -136,16 +137,14 @@ function failure(code: string | null): string {
   switch (code) {
     case "silence":
       return "Je n'ai rien entendu.";
-    case "canceled":
-      return "Windows a interrompu l'écoute. Réessaie dans un instant.";
+    case "unclear":
+      return "Je n'ai pas bien compris, tu peux répéter ?";
     case "microphone":
       return "Je n'arrive pas à utiliser ton micro.";
-    case "privacy":
-      return "Active la reconnaissance vocale en ligne dans Windows : Paramètres, Confidentialité, Voix.";
-    case "network":
-      return "La reconnaissance vocale a besoin d'Internet.";
-    case "dictation":
-      return "La dictée n'est pas disponible dans la langue de Windows.";
+    case "model":
+      return "Je télécharge ma reconnaissance vocale (190 Mo, une seule fois). Réessaie dans une minute.";
+    case "cpu":
+      return "Ton processeur est trop ancien pour la reconnaissance vocale locale (il lui faut AVX2).";
     default:
       return "La reconnaissance vocale a échoué.";
   }
@@ -194,7 +193,7 @@ function finish(message: string, failed: boolean) {
 }
 
 export function listen() {
-  if (!armed()) return;
+  if (!armed() || awaiting) return;
   flow++;
   stopSpeaking();
   if (State.voicePhase === "idle") pauseMusic();
@@ -204,12 +203,15 @@ export function listen() {
   State.voiceFailed = false;
   island.voiceMood("listen");
   island.openVoice();
+  awaiting = true;
   void Bridge.voiceListen();
   State.notify();
 }
 
 export function stop() {
   flow++;
+  if (awaiting) void Bridge.voiceCancel();
+  awaiting = false;
   stopSpeaking();
   State.voicePhase = "idle";
   State.voicePartial = "";
@@ -313,9 +315,11 @@ async function ask(text: string, mine: number) {
 }
 
 async function onFinal(final: VoiceFinal) {
-  if (State.voicePhase !== "listening") return;
+  if (!awaiting) return;
+  awaiting = false;
   const mine = flow;
   const text = final.text.trim();
+  if (final.error === "canceled") return;
   if (final.error || !text) {
     finish(failure(final.error ?? "silence"), true);
     return;
@@ -391,5 +395,11 @@ export function registerVoice(target: Island) {
   void onEvent<VoiceFinal>("voice-final", (final) => void onFinal(final));
   void onEvent<null>("voice-ready", () => {
     if (State.voicePhase === "listening") Sound.play("peek");
+  });
+  void onEvent<null>("voice-busy", () => {
+    if (State.voicePhase !== "listening") return;
+    State.voicePhase = "thinking";
+    island.voiceMood("off");
+    State.notify();
   });
 }

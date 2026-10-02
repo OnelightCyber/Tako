@@ -120,6 +120,11 @@ export const Bridge = {
   notificationOpen: (appId: string) => call<boolean>("notification_open", { appId }),
   hudTest: (kind: string) => call<void>("hud_test", { kind }),
   voiceListen: () => call<void>("voice_listen"),
+  voiceCancel: () => call<void>("voice_cancel"),
+  sttStatus: () => call<SttStatus>("stt_status"),
+  sttDownload: () => call<void>("stt_download"),
+  ttsStatus: (voice: string) => call<TtsStatus>("tts_status", { voice }),
+  ttsDownload: (voice: string) => call<void>("tts_download", { voice }),
   voiceSay: (text: string) => callOrThrow<string>("voice_say", { text }),
 };
 
@@ -127,6 +132,35 @@ export interface VoiceHeard {
   kind: "wake" | "yes" | "no" | "stop";
   text: string;
   sure: boolean;
+}
+
+export interface SttStatus {
+  installed: boolean;
+  downloading: boolean;
+  received: number;
+  total: number;
+}
+
+export interface TtsStatus {
+  ready: boolean;
+  downloading: boolean;
+  received: number;
+  total: number;
+}
+
+export interface TtsProgress {
+  voice: string;
+  received: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+}
+
+export interface SttProgress {
+  received: number;
+  total: number;
+  done: boolean;
+  error: string | null;
 }
 
 export interface VoiceFinal {

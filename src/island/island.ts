@@ -6,7 +6,7 @@ import {
   islandSize,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
-import { Hud, type HudSpec } from "../core/hud";
+import { Hud, shortDate, type HudSpec } from "../core/hud";
 import { Sound } from "../core/sound";
 import { PLACEHOLDER_ID, State } from "../core/state";
 import { BotEngine, hexToRGB, type VoiceMood } from "../mascot/engine";
@@ -41,12 +41,7 @@ const modeOrder = (m: IslandMode) => (m === "hidden" ? 0 : m === "compact" ? 1 :
 
 const LONG_PRESS_MS = 420;
 
-const DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
-const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
-function shortDate(d: Date): string {
-  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
-}
 
 export class Island {
   readonly fsm = new IslandStateMachine();

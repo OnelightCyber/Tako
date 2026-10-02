@@ -28,7 +28,14 @@ export function runAliveDemo(island: Island, kind: string) {
   State.weather = { city: "Paris", temp: 14.2, code: 3, isDay: true, max: 17, min: 9, wind: 12, humidity: 71, days: [] };
   State.settings.voiceEnabled = kind.startsWith("voice") || kind === "glance-mic";
   window.setTimeout(() => {
-    if (kind === "glance" || kind === "glance-mic") {
+    if (kind === "overview") {
+      State.stats = { cpu: 13, ram: 48, ramUsedGb: 7.6, ramTotalGb: 16, gpu: 4 };
+      State.usage = { lines: [{ label: "Current session", percent: 34, resets: "" }], subscription: true, fetchedAt: Date.now() };
+      State.settings.voiceEnabled = true;
+      State.tasks.unshift(busy());
+      State.focusId = "session:a1";
+      island.setView("overview");
+    } else if (kind === "glance" || kind === "glance-mic") {
       island.fsm.forcePetit();
     } else if (kind === "session") {
       State.tasks.unshift(busy());

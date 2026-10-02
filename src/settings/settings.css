@@ -1469,6 +1469,36 @@ button {
   color: var(--accent);
 }
 
+.stt-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stt-bar {
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.stt-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #a78bfa;
+  transition: width 0.3s ease;
+}
+
+.stt-pct {
+  min-width: 38px;
+  font: 600 12px var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  text-align: right;
+}
+
 .muted-list {
   padding: 2px 18px 12px;
   display: flex;

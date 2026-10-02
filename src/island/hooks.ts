@@ -211,6 +211,20 @@ function findActivity(task: AgentTask, payload: HookPayload): Activity | undefin
 
 const loggedShapes = new Set<string>();
 
+const SYSTEM_TAGS = /<(task-notification|system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook)\b[^>]*>[\s\S]*?(<\/\1>|$)/g;
+
+export function promptText(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const command = /<command-name>\s*([^<]+?)\s*<\/command-name>/.exec(raw)?.[1];
+  if (command) {
+    const args = /<command-args>\s*([^<]*?)\s*<\/command-args>/.exec(raw)?.[1] ?? "";
+    return `${command.startsWith("/") ? command : `/${command}`}${args ? ` ${args}` : ""}`;
+  }
+  const clean = raw.replace(SYSTEM_TAGS, " ").replace(/\s+/g, " ").trim();
+  if (clean) return clean;
+  return /<task-notification\b/.test(raw) ? "Tâche de fond terminée" : null;
+}
+
 const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\b(vitest|jest|mocha|playwright\s+test)\b|\bpytest\b|\bpython3?\s+-m\s+(pytest|unittest)\b|\bcargo\s+(test|nextest)\b|\bgo\s+test\b|\bdotnet\s+test\b|\b(mvn|gradle|gradlew)\s+test\b|\brspec\b|\bphpunit\b|\bmix\s+test\b|\bdeno\s+test\b/;
 const TEST_FAILED = /\b[1-9]\d* (failed|failing|failures?|errors?)\b|\bFAILED\b|\bFAIL\b|\bfailures=[1-9]/;
 
@@ -436,8 +450,8 @@ export function handleHook(island: Island, payload: HookPayload) {
       claimFocus(task);
       task.state = "thinking";
       task.pillBadge = null;
-      const asked = payload.prompt ?? payload.user_prompt ?? payload.message;
-      startTurn(task, asked?.trim() ? asked.trim().slice(0, 400) : null);
+      const asked = promptText(payload.prompt ?? payload.user_prompt ?? payload.message);
+      startTurn(task, asked ? asked.slice(0, 400) : null);
       if (asked) State.appendStep(task.id, asked.slice(0, 60));
       surface("overview", false);
       break;

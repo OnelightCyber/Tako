@@ -10,18 +10,16 @@ use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Globalization::Language;
 use windows::Media::SpeechRecognition::{
     SpeechContinuousRecognitionCompletedEventArgs, SpeechContinuousRecognitionResultGeneratedEventArgs,
-    SpeechContinuousRecognitionSession, SpeechRecognitionConfidence, SpeechRecognitionHypothesisGeneratedEventArgs,
-    SpeechRecognitionListConstraint, SpeechRecognitionResultStatus, SpeechRecognizer,
+    SpeechContinuousRecognitionSession, SpeechRecognitionConfidence, SpeechRecognitionListConstraint,
+    SpeechRecognitionResultStatus, SpeechRecognizer,
 };
 use windows::Media::SpeechSynthesis::SpeechSynthesizer;
 use windows::Storage::Streams::DataReader;
-use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
-use windows::Win32::Media::Audio::{eCapture, eCommunications, IMMDeviceEnumerator, MMDeviceEnumerator};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows_collections::IIterable;
 
 use crate::island::WINDOW_LABEL;
-use crate::log;
+use crate::{log, mic, stt, tts};
 
 const WAKE: &[&str] = &["hé tako", "hey tako", "ok tako", "salut tako", "dis tako"];
 const YES: &[&str] = &["tako oui", "oui tako", "tako autorise", "tako valide"];
@@ -33,6 +31,7 @@ const MAX_SPEECH: usize = 600;
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static LISTENING: AtomicBool = AtomicBool::new(false);
 static STOPPING: AtomicBool = AtomicBool::new(false);
+static CANCEL: AtomicBool = AtomicBool::new(false);
 static TX: OnceLock<Mutex<Sender<Command>>> = OnceLock::new();
 
 enum Command {
@@ -56,6 +55,12 @@ pub struct Final {
     pub error: Option<String>,
 }
 
+impl Final {
+    fn failed(error: &str) -> Final {
+        Final { text: String::new(), error: Some(error.to_string()) }
+    }
+}
+
 fn send(cmd: Command) {
     if let Some(tx) = TX.get() {
         let _ = tx.lock().unwrap().send(cmd);
@@ -69,7 +74,14 @@ pub fn set_enabled(on: bool) {
 }
 
 pub fn listen() {
+    CANCEL.store(false, Ordering::Relaxed);
     send(Command::Listen);
+}
+
+pub fn cancel() {
+    if LISTENING.load(Ordering::Relaxed) {
+        CANCEL.store(true, Ordering::Relaxed);
+    }
 }
 
 pub fn kind_of(tag: &str) -> &'static str {
@@ -86,6 +98,10 @@ fn language() -> windows::core::Result<Language> {
         Ok(lang) => Ok(lang),
         Err(_) => Language::CreateLanguage(&HSTRING::from("fr-FR")),
     }
+}
+
+fn language_tag() -> String {
+    language().and_then(|l| l.LanguageTag()).map(|t| t.to_string()).unwrap_or_else(|_| "fr-FR".into())
 }
 
 fn phrases(words: &[&str]) -> IIterable<HSTRING> {
@@ -141,82 +157,69 @@ fn wake(app: &AppHandle, tx: Sender<Command>) -> windows::core::Result<Wake> {
     Ok(Wake { recognizer, session })
 }
 
-fn dictate(app: &AppHandle) -> Final {
-    let emitter = app.clone();
-    let ready = app.clone();
-    dictate_with(
-        move |text| {
-            let _ = emitter.emit_to(WINDOW_LABEL, "voice-partial", text);
-        },
-        move || {
-            let _ = ready.emit_to(WINDOW_LABEL, "voice-ready", ());
-        },
-    )
-}
-
-fn dictate_with(on_partial: impl Fn(String) + Send + Sync + Clone + 'static, on_ready: impl FnOnce()) -> Final {
-    let run = || -> windows::core::Result<Final> {
-        let recognizer = SpeechRecognizer::Create(&language()?)?;
-        let timeouts = recognizer.Timeouts()?;
-        timeouts.SetInitialSilenceTimeout(ticks(6.0))?;
-        timeouts.SetEndSilenceTimeout(ticks(1.1))?;
-        timeouts.SetBabbleTimeout(ticks(20.0))?;
-        let compiled = recognizer.CompileConstraintsAsync()?.get()?;
-        if compiled.Status()? != SpeechRecognitionResultStatus::Success {
-            return Ok(Final { text: String::new(), error: Some("dictation".into()) });
-        }
-        let partial = on_partial.clone();
-        recognizer.HypothesisGenerated(&TypedEventHandler::new(
-            move |_: Ref<SpeechRecognizer>, args: Ref<SpeechRecognitionHypothesisGeneratedEventArgs>| {
-                if let Some(args) = args.as_ref() {
-                    partial(args.Hypothesis()?.Text()?.to_string());
-                }
-                Ok(())
-            },
-        ))?;
-        let pending = recognizer.RecognizeAsync()?;
-        on_ready();
-        let result = pending.get()?;
-        let status = result.Status()?;
-        let text = result.Text().map(|t| t.to_string()).unwrap_or_default();
-        let error = match status {
-            SpeechRecognitionResultStatus::Success => None,
-            SpeechRecognitionResultStatus::UserCanceled => Some("canceled".to_string()),
-            SpeechRecognitionResultStatus::TimeoutExceeded => Some("silence".to_string()),
-            SpeechRecognitionResultStatus::AudioQualityFailure | SpeechRecognitionResultStatus::MicrophoneUnavailable => Some("microphone".to_string()),
-            SpeechRecognitionResultStatus::NetworkFailure => Some("network".to_string()),
-            other => Some(format!("{:?}", other)),
-        };
-        Ok(Final { text, error })
-    };
-    run().unwrap_or_else(|err| {
-        let code = err.code().0 as u32;
-        let error = if code == 0x8004_5509 { "privacy".to_string() } else { format!("{code:#010x} {}", err.message()) };
-        Final { text: String::new(), error: Some(error) }
-    })
-}
-
-fn meter() -> Option<IAudioMeterInformation> {
-    unsafe {
-        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-        let device = enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications).ok()?;
-        device.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None).ok()
+fn listen_once(app: &AppHandle) -> Final {
+    if !stt::cpu_ok() {
+        return Final::failed("cpu");
     }
-}
-
-fn spawn_meter(app: AppHandle) {
-    std::thread::spawn(move || {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        let Some(m) = meter() else { return };
-        while LISTENING.load(Ordering::Relaxed) {
-            if let Ok(peak) = unsafe { m.GetPeakValue() } {
-                let _ = app.emit_to(WINDOW_LABEL, "voice-level", peak);
+    if !stt::installed() {
+        stt::start_download(app.clone());
+        return Final::failed("model");
+    }
+    std::thread::spawn(|| {
+        let _ = stt::ensure_loaded();
+    });
+    let code = stt::whisper_language(&language_tag());
+    let (tx, rx) = channel::<Vec<f32>>();
+    let partial = app.clone();
+    let worker = std::thread::spawn(move || {
+        while let Ok(mut audio) = rx.recv() {
+            while let Ok(newer) = rx.try_recv() {
+                audio = newer;
             }
-            std::thread::sleep(Duration::from_millis(45));
+            if CANCEL.load(Ordering::Relaxed) {
+                continue;
+            }
+            if let Ok(text) = stt::transcribe(&audio, code) {
+                if !text.is_empty() {
+                    let _ = partial.emit_to(WINDOW_LABEL, "voice-partial", text);
+                }
+            }
         }
     });
+    let ready = app.clone();
+    let level = app.clone();
+    let recording = mic::record(
+        &CANCEL,
+        || {
+            let _ = ready.emit_to(WINDOW_LABEL, "voice-ready", ());
+        },
+        |peak| {
+            let _ = level.emit_to(WINDOW_LABEL, "voice-level", peak);
+        },
+        |audio| {
+            let _ = tx.send(audio.to_vec());
+        },
+    );
+    drop(tx);
+    let _ = worker.join();
+    if CANCEL.load(Ordering::Relaxed) {
+        return Final::failed("canceled");
+    }
+    match recording {
+        Err(err) => {
+            log::line(format!("voice: microphone ({err})"));
+            Final::failed("microphone")
+        }
+        Ok(r) if !r.heard => Final::failed("silence"),
+        Ok(r) => {
+            let _ = app.emit_to(WINDOW_LABEL, "voice-busy", ());
+            match stt::transcribe(&r.samples, code) {
+                Ok(text) if text.is_empty() => Final::failed("unclear"),
+                Ok(text) => Final { text, error: None },
+                Err(err) => Final::failed(&err),
+            }
+        }
+    }
 }
 
 fn stop(current: &mut Option<Wake>) {
@@ -258,7 +261,8 @@ fn run(app: AppHandle, rx: Receiver<Command>, tx: Sender<Command>) {
                 }
             }
         }
-        let cmd = match rx.recv_timeout(if current.is_none() && ENABLED.load(Ordering::Relaxed) { wait } else { Duration::from_secs(3600) }) {
+        let timeout = if current.is_none() && ENABLED.load(Ordering::Relaxed) { wait } else { Duration::from_secs(60) };
+        let cmd = match rx.recv_timeout(timeout) {
             Ok(cmd) => Some(cmd),
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => return,
@@ -270,15 +274,17 @@ fn run(app: AppHandle, rx: Receiver<Command>, tx: Sender<Command>) {
             Some(Command::Listen) => {
                 stop(&mut current);
                 LISTENING.store(true, Ordering::Relaxed);
-                spawn_meter(app.clone());
-                let heard = dictate(&app);
+                let heard = listen_once(&app);
                 LISTENING.store(false, Ordering::Relaxed);
+                CANCEL.store(false, Ordering::Relaxed);
                 if let Some(error) = &heard.error {
-                    log::line(format!("voice: dictation ended ({error})"));
+                    if error != "silence" && error != "canceled" {
+                        log::line(format!("voice: listening ended ({error})"));
+                    }
                 }
                 let _ = app.emit_to(WINDOW_LABEL, "voice-final", heard);
             }
-            None => {}
+            None => stt::unload_idle(),
         }
     }
 }
@@ -289,11 +295,26 @@ pub fn start(app: AppHandle) {
     std::thread::spawn(move || run(app, rx, tx));
 }
 
-pub fn say(text: &str) -> Result<String, String> {
+fn data_url(wav: &[u8]) -> String {
+    format!("data:audio/wav;base64,{}", crate::claude::base64_for(wav))
+}
+
+pub fn say(text: &str, voice: &str) -> Result<String, String> {
     let text: String = text.chars().take(MAX_SPEECH).collect();
+    if voice != "windows" {
+        match tts::synthesize(voice, &text) {
+            Ok(wav) => return Ok(data_url(&wav)),
+            Err(err) if err != "voice" => log::line(format!("voice: natural voice failed ({err})")),
+            Err(_) => {}
+        }
+    }
+    windows_say(&text)
+}
+
+fn windows_say(text: &str) -> Result<String, String> {
     let synth = SpeechSynthesizer::new().map_err(|e| e.to_string())?;
     if let Ok(voices) = SpeechSynthesizer::AllVoices() {
-        let wanted = language().ok().and_then(|l| l.LanguageTag().ok()).map(|t| t.to_string().to_lowercase()).unwrap_or_else(|| "fr-fr".into());
+        let wanted = language_tag().to_lowercase();
         let prefix = wanted.split('-').next().unwrap_or("fr").to_string();
         let mut chosen = None;
         for voice in voices {
@@ -316,7 +337,7 @@ pub fn say(text: &str) -> Result<String, String> {
     reader.LoadAsync(size).map_err(|e| e.to_string())?.get().map_err(|e| e.to_string())?;
     let mut bytes = vec![0u8; size as usize];
     reader.ReadBytes(&mut bytes).map_err(|e| e.to_string())?;
-    Ok(format!("data:audio/wav;base64,{}", crate::claude::base64_for(&bytes)))
+    Ok(data_url(&bytes))
 }
 
 #[cfg(test)]
@@ -334,23 +355,12 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn live_dictation_reports_its_status() {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        let started = std::time::Instant::now();
-        let heard = dictate_with(|text| println!("partial: {text}"), || println!("ready"));
-        println!("after {:?}: text={:?} error={:?}", started.elapsed(), heard.text, heard.error);
-    }
-
-    #[test]
-    #[ignore]
     fn live_speech_synthesis_returns_a_wav() {
         let started = std::time::Instant::now();
-        let url = say("Bonjour, je suis Tako.").expect("synthesis");
+        let url = say("Bonjour, je suis Tako.", "windows").expect("synthesis");
         let first = started.elapsed();
         let again = std::time::Instant::now();
-        let second = say("Il est vingt et une heures.").expect("synthesis");
+        let second = say("Il est vingt et une heures.", "windows").expect("synthesis");
         println!("first {:?}, second {:?}", first, again.elapsed());
         assert!(url.starts_with("data:audio/wav;base64,UklGR"));
         assert!(url.len() > 20_000 && second.len() > 20_000);

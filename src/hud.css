@@ -769,6 +769,7 @@
   height: 10px;
 }
 
+.glance-pill,
 .notice-pill,
 .privacy-pill {
   justify-content: flex-start;
@@ -776,6 +777,7 @@
   padding: 0 8px 0 4px;
 }
 
+.pill.glance-pill .lbl,
 .pill.notice-pill .lbl,
 .pill.privacy-pill .lbl {
   position: static;

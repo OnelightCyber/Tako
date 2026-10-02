@@ -1,7 +1,135 @@
-import { Bridge } from "../core/bridge";
-import { h } from "../views/dom";
+import { Bridge, onEvent, type SttProgress, type SttStatus, type TtsProgress, type TtsStatus } from "../core/bridge";
+import { dropdown } from "./dropdown";
+import { h, clear } from "../views/dom";
 import { app, set } from "./ctx";
-import { group, inline, pageHead, row, testButton, toggle } from "./ui";
+import { button, group, inline, pageHead, pill, row, testButton, toggle, whenShown } from "./ui";
+
+let modelHost: HTMLElement | null = null;
+let listening = false;
+
+function drawModel(s: SttStatus | null, error: string | null = null) {
+  const host = modelHost;
+  if (!host || !host.isConnected) return;
+  clear(host);
+  if (!s) {
+    host.append(pill("off", "Indisponible"));
+    return;
+  }
+  if (s.installed) {
+    host.append(pill("ok", "Prête"));
+    return;
+  }
+  if (s.downloading) {
+    const pct = s.total ? Math.min(100, Math.round((s.received / s.total) * 100)) : 0;
+    host.append(h("div", { class: "stt-bar" }, h("i", { style: `width:${pct}%` })), h("span", { class: "stt-pct", text: `${pct} %` }));
+    return;
+  }
+  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : "Échec, réessaie" }));
+  host.append(button("Télécharger · 190 Mo", "primary", () => {
+    void Bridge.sttDownload();
+    window.setTimeout(refreshModel, 500);
+  }, "download"));
+}
+
+function refreshModel() {
+  void Bridge.sttStatus().then((s) => drawModel(s));
+}
+
+const VOICES = [
+  { value: "siwis", label: "Siwis · féminine" },
+  { value: "pierre", label: "Pierre · masculine" },
+  { value: "jessica", label: "Jessica · féminine" },
+  { value: "windows", label: "Voix de Windows" },
+];
+const SAMPLE = "Bonjour, je suis Tako. Je te lis les réponses de Claude, et je peux lancer un minuteur ou mettre ta musique en pause.";
+
+let voiceHost: HTMLElement | null = null;
+let voiceListening = false;
+let sample: HTMLAudioElement | null = null;
+
+function voiceSize(total: number): string {
+  return `${Math.max(1, Math.round(total / 1_000_000))} Mo`;
+}
+
+function drawVoice(s: TtsStatus | null, error: string | null = null) {
+  const host = voiceHost;
+  if (!host || !host.isConnected) return;
+  clear(host);
+  const name = app.ctx.settings.voiceName;
+  const listen = button("Écouter", "ghost", () => {
+    listen.disabled = true;
+    void Bridge.voiceSay(SAMPLE).then((url) => {
+      sample?.pause();
+      sample = new Audio(url);
+      void sample.play();
+    }).catch(() => undefined).finally(() => {
+      listen.disabled = false;
+    });
+  }, "play");
+  listen.classList.add("small");
+  if (name === "windows" || !s || s.ready) {
+    host.append(listen);
+    return;
+  }
+  if (s.downloading) {
+    const pct = s.total ? Math.min(100, Math.round((s.received / s.total) * 100)) : 0;
+    host.append(h("div", { class: "stt-bar" }, h("i", { style: `width:${pct}%` })), h("span", { class: "stt-pct", text: `${pct} %` }));
+    return;
+  }
+  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : "Échec, réessaie" }));
+  host.append(button(`Télécharger · ${voiceSize(s.total)}`, "primary", () => {
+    void Bridge.ttsDownload(name);
+    window.setTimeout(refreshVoice, 500);
+  }, "download"));
+}
+
+function refreshVoice() {
+  const name = app.ctx.settings.voiceName;
+  if (name === "windows") {
+    drawVoice(null);
+    return;
+  }
+  void Bridge.ttsStatus(name).then((s) => drawVoice(s));
+}
+
+function voiceControl(): HTMLElement {
+  voiceHost = h("div", { class: "stt-state" });
+  whenShown(voiceHost, refreshVoice);
+  if (!voiceListening) {
+    voiceListening = true;
+    void onEvent<TtsProgress>("tts-progress", (p) => {
+      if (p.voice !== app.ctx.settings.voiceName) return;
+      if (p.done) {
+        if (p.error) drawVoice({ ready: false, downloading: false, received: 0, total: p.total }, p.error);
+        else refreshVoice();
+        return;
+      }
+      drawVoice({ ready: false, downloading: true, received: p.received, total: p.total });
+    });
+  }
+  return inline(dropdown(VOICES, app.ctx.settings.voiceName, (v) => {
+    set("voiceName", v, "Voix changée");
+    if (v !== "windows" && app.ctx.settings.voiceEnabled) void Bridge.ttsDownload(v);
+    window.setTimeout(refreshVoice, 400);
+  }), voiceHost);
+}
+
+function modelControl(): HTMLElement {
+  modelHost = h("div", { class: "stt-state" });
+  whenShown(modelHost, refreshModel);
+  if (!listening) {
+    listening = true;
+    void onEvent<SttProgress>("stt-progress", (p) => {
+      if (p.done) {
+        if (p.error) drawModel({ installed: false, downloading: false, received: 0, total: p.total }, p.error);
+        else refreshModel();
+        return;
+      }
+      drawModel({ installed: false, downloading: true, received: p.received, total: p.total });
+    });
+  }
+  return modelHost;
+}
 
 function tryIt(kind: string): HTMLElement {
   return testButton(() => void Bridge.hudTest(kind));
@@ -18,11 +146,15 @@ export function voicePage(): Node[] {
   listenNow.disabled = !on;
   return [
     pageHead("mic", "orange", "Assistant vocal", "Tako en mode Jarvis : tu lui parles, Claude te répond à voix haute."),
-    group({ title: "Écoute", icon: "mic", tone: "orange", note: "Le mot de réveil est reconnu sur ton PC par Windows, rien n'est enregistré. Pendant un appel ou en mode jeu, Tako n'écoute pas les commandes." },
+    group({ title: "Écoute", icon: "mic", tone: "orange", note: "Tout se passe sur ton PC : Windows guette « Hey Tako », puis Whisper transcrit ta question. Ta voix ne quitte jamais l'ordinateur, seule ta question écrite part vers Claude. Pendant un appel ou en mode jeu, Tako n'écoute pas les commandes." },
       row({ icon: "mic", tone: "orange", title: "Réveil « Hey Tako »", desc: "Dis « Hey Tako », l'îlot s'ouvre et le personnage t'écoute. Tu peux aussi cliquer sur le micro dans l'îlot.", keywords: "jarvis voix micro parler hey ok salut",
         control: inline(listenNow, toggle(on, (v) => set("voiceEnabled", v, v ? "Tako t'écoute" : "Écoute coupée"))) }),
-      row({ icon: "speaker", tone: "green", title: "Répondre à voix haute", desc: "Avec la voix française de Windows. Sinon la réponse s'affiche seulement.", keywords: "synthèse vocale parole lecture",
+      row({ icon: "sparkles", tone: "purple", title: "Reconnaissance vocale", desc: "Whisper, en local et en français. Le modèle (190 Mo) se télécharge une seule fois, quand tu actives l'écoute.", keywords: "whisper modèle dictée transcription hors ligne",
+        control: modelControl() }),
+      row({ icon: "speaker", tone: "green", title: "Répondre à voix haute", desc: "Sinon la réponse s'affiche seulement.", keywords: "synthèse vocale parole lecture",
         control: toggle(c.settings.voiceReplies, (v) => set("voiceReplies", v)) }),
+      row({ icon: "music", tone: "pink", title: "Voix de Tako", desc: "Des voix naturelles (Piper) qui tournent sur ton PC, téléchargées une seule fois. La voix de Windows reste disponible, en plus robotique.", keywords: "voix naturelle piper siwis pierre jessica synthèse",
+        control: voiceControl(), wide: true }),
       row({ icon: "shieldCheck", tone: "amber", title: "Valider les permissions à la voix", desc: "« Tako, oui » autorise et « Tako, non » refuse la demande affichée. Un « oui » n'est accepté que si Tako est sûr de l'avoir entendu.", keywords: "approbation autoriser refuser permission oui non",
         control: toggle(c.settings.voiceApprovals, (v) => set("voiceApprovals", v), !on) }),
     ),
@@ -37,7 +169,7 @@ export function voicePage(): Node[] {
       ),
     ),
     group({ title: "Bon à savoir", icon: "info", tone: "gray" },
-      h("p", { class: "group-note", text: "Ta question passe par la dictée de Windows, qui utilise la reconnaissance vocale en ligne de Microsoft : active-la dans Paramètres Windows › Confidentialité et sécurité › Voix si Tako te le demande." }),
+      h("p", { class: "group-note", text: "Attends le petit bip après « Hey Tako », puis parle normalement : Tako s'arrête d'écouter dès que tu te tais." }),
       h("p", { class: "group-note", text: "Pendant que Tako t'écoute ou te répond, la musique se met en pause puis reprend toute seule." }),
     ),
   ];

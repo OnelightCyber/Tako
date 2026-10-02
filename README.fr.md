@@ -168,8 +168,13 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
 ### Tako en mode Jarvis
 
 - **« Hey Tako »** : dis-le et l'îlot s'ouvre, le personnage penche la tête et t'écoute, avec des barres qui suivent
-  ta voix. Pose ta question à voix haute : Claude répond avec ton propre compte Claude Code et Tako lit la réponse
-  avec la voix française de Windows. « Tako, stop » coupe la parole.
+  ta voix et tes mots qui s'affichent pendant que tu parles. Pose ta question à voix haute : Claude répond avec ton
+  propre compte Claude Code et Tako lit la réponse avec une voix naturelle. « Tako, stop » coupe la parole.
+- **Des voix naturelles** : Siwis, Pierre ou Jessica, des voix neuronales [Piper](https://github.com/rhasspy/piper) qui
+  tournent sur ton PC (environ 85 Mo, téléchargées une fois). La voix de Windows reste disponible.
+- **Ta voix reste sur ton PC** : Windows repère « Hey Tako », puis [Whisper](https://github.com/ggml-org/whisper.cpp)
+  transcrit ta question en local, en une demi-seconde environ. Le modèle (190 Mo) se télécharge une seule fois et
+  son SHA-256 est vérifié.
 - **Réponses instantanées** : l'heure, la date, la météo, « mets un minuteur de 10 minutes », « pause », « musique
   suivante » — tout de suite, sans Claude.
 - **Permissions à la voix** (en option) : « Tako, oui » autorise et « Tako, non » refuse la demande affichée. Un
@@ -371,8 +376,8 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
 - **Secrets** dans le Gestionnaire d'identification Windows (service `dev.tako.island`) ; l'interface peut seulement
   demander si une clé existe.
 - **Pas de télémétrie.** Les requêtes réseau vont vers les services que tu configures, et vers Claude via ton propre
-  Claude Code. Le mot de réveil « Hey Tako » est reconnu sur ton PC ; ta question parlée passe par la dictée de
-  Windows (reconnaissance vocale en ligne de Microsoft) seulement si tu actives l'assistant vocal.
+  Claude Code. Ta voix ne quitte jamais ton PC : le mot de réveil et la transcription tournent en local, seule ta
+  question écrite part vers Claude. Le modèle vocal vient une fois de Hugging Face, SHA-256 vérifié.
 - **La Lentille lit, n'envoie pas** : le texte copié est reconnu sur place ; il ne part vers Claude, un transporteur
   ou Google Maps que quand tu cliques sur une action, et les copies des gestionnaires de mots de passe sont ignorées.
 - **Rien n'est injecté en HTML** : le code de tes fichiers est construit nœud par nœud, jamais via `innerHTML`.
@@ -423,6 +428,11 @@ npm run tauri dev       # l'app complète, rechargement à chaud
 npm run dev             # juste l'interface dans un navigateur
 ```
 
+- **Compiler** : Whisper est compilé depuis ses sources, il faut donc CMake et libclang. Installe LLVM
+  (`winget install LLVM.LLVM`) ou dépose `libclang.dll` dans `tools/libclang/` ; `.cargo/config.toml` active les
+  optimisations `/O2` que cmake-rs oublie avec MSVC.
+- **Démos de l'îlot** : <http://127.0.0.1:1420/?alive=glance> (aussi `session`, `lens-error`, `lens-address`,
+  `lens-tracking`, `lens-english`, `voice-listen`, `voice-think`, `voice-answer`, `voice-fail`).
 - **Démo de la vue live** : `npm run dev` puis <http://127.0.0.1:1420/?demo> (ajoute
   `&until=plan|read|edit|diff|shell` pour figer une étape).
 - **Réglages de démo** : <http://127.0.0.1:1420/settings.html?demo>.
@@ -463,7 +473,9 @@ src-tauri/src/            backend Rust
   widget.rs               la fenêtre du widget : places, drag, aimantation
   sessions.rs             contexte, bilan du tour, Annuler, Commit, diff, missions
   media.rs                ce qui joue (sessions média Windows)
-  voice.rs                « Hey Tako », dictée et voix de Windows
+  voice.rs                « Hey Tako », écoute, réponses à voix haute
+  tts.rs, assets.rs       voix naturelles Piper, téléchargements vérifiés
+  mic.rs, stt.rs          capture du micro, fin de phrase, Whisper en local
   clipboard.rs            la Lentille : ce que tu copies, reconnu sur place
   sysstats.rs             processeur, mémoire, carte graphique
   browser.rs              serveur Playwright persistant de l'agent

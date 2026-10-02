@@ -14,7 +14,7 @@ import {
   contextBadge, fit, mediaPill, statsPill,
 } from "./extra";
 import { buildBluetooth, buildTimer, buildVpn, timerPill } from "./live";
-import { buildNotifications, homeCard, noticePill, privacyPill } from "./hub";
+import { buildNotifications, glancePills, homeCard, noticePill, privacyPill } from "./hub";
 import { buildToday } from "./today";
 import { buildVoice } from "./voice";
 import { Timer } from "../core/timer";
@@ -164,6 +164,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   const stats = statsPill(actions);
   const notice = noticePill(actions);
   const privacy = privacyPill();
+  const fillers = glancePills(actions);
   let detailOpen = false;
   let lastFocus: string | null = null;
   let mode: "ticker" | "card" | "home" | null = null;
@@ -256,7 +257,9 @@ function buildOverview(actions: ViewActions): ViewHost {
       const showNotice = State.settings.notificationsEnabled;
       const used = [showTimer, showMedia, showStats, showPrivacy, showNotice].filter(Boolean).length;
       const others = State.otherTasks.slice(0, Math.max(0, Math.min(4, 6 - used)));
-      const pillKey = `${others.map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.name}`).join("|")}~${showTimer}~${showMedia}~${showStats}~${showPrivacy}~${showNotice}`;
+      const room = Math.max(0, 6 - used - others.length);
+      const filled = fillers.filter((f) => f.available()).slice(0, room);
+      const pillKey = `${others.map((t) => `${t.id}:${t.pillBadge ?? ""}:${t.name}`).join("|")}~${showTimer}~${showMedia}~${showStats}~${showPrivacy}~${showNotice}~${filled.map((f) => fillers.indexOf(f)).join(",")}`;
       if (pillKey !== pillIds) {
         pillIds = pillKey;
         clear(pills);
@@ -266,8 +269,10 @@ function buildOverview(actions: ViewActions): ViewHost {
         if (showMedia) pills.append(media.el);
         if (showNotice) pills.append(notice.el);
         if (showStats) pills.append(stats.el);
+        for (const f of filled) pills.append(f.el);
         pruneMiniBots();
       }
+      for (const f of filled) f.update();
       if (showTimer) timer.update();
       if (showMedia) media.update();
       if (showStats) stats.update();

@@ -1,5 +1,5 @@
 import { Bridge, type NoticeInfo } from "../core/bridge";
-import { ago, initials, toneFor } from "../core/hud";
+import { ago, initials, shortDate, toneFor } from "../core/hud";
 import { State } from "../core/state";
 import { Timer } from "../core/timer";
 import { dropNotice, openNotice } from "../island/system";
@@ -8,6 +8,9 @@ import { islandBox, setSizeHint } from "./fit";
 import { proIcon, type ProIconName } from "./pro-icons";
 import { weatherIcon, weatherLabel, weatherTone } from "./weather";
 import type { ViewActions, ViewHost } from "./views";
+import { liveRing } from "./extra";
+import { VoiceUi } from "./voice";
+import { mainLines, tone } from "../usage/gauge";
 
 const DAYS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
@@ -206,6 +209,88 @@ export function noticePill(actions: ViewActions): { el: HTMLElement; update(): v
       count.style.display = State.unreadNotices ? "" : "none";
     },
   };
+}
+
+export interface GlancePill {
+  el: HTMLElement;
+  available(): boolean;
+  update(): void;
+}
+
+function glance(kind: string, title: string, run: () => void): { el: HTMLElement; ico: HTMLElement; label: HTMLElement } {
+  const ico = h("div", { class: `pill-ico ${kind}` });
+  const label = h("span", { class: "lbl" });
+  const el = h("div", { class: `pill glance-pill ${kind}-pill`, title, onclick: run }, ico, label);
+  return { el, ico, label };
+}
+
+export function glancePills(actions: ViewActions): GlancePill[] {
+  const wx = glance("wx", "Météo du jour", () => actions.setView("today"));
+  let wxKey = "";
+  const weather: GlancePill = {
+    el: wx.el,
+    available: () => State.settings.weatherEnabled && !!State.weather,
+    update() {
+      const w = State.weather;
+      if (!w) return;
+      const key = `${w.code}~${w.isDay}`;
+      if (key !== wxKey) {
+        wxKey = key;
+        clear(wx.ico);
+        wx.ico.append(proIcon(weatherIcon(w), 13, 2.2));
+        wx.el.style.setProperty("--g", weatherTone(w));
+      }
+      wx.label.textContent = w.city ? `${Math.round(w.temp)}° · ${w.city}` : `${Math.round(w.temp)}°`;
+    },
+  };
+
+  const us = glance("usage", "Ton utilisation de Claude", () => actions.openSettingsWindow());
+  const ring = liveRing(20, 2.6);
+  us.ico.append(ring.el);
+  const usage: GlancePill = {
+    el: us.el,
+    available: () => !!State.usage && State.usage.lines.length > 0,
+    update() {
+      const line = State.usage ? mainLines(State.usage.lines)[0] : undefined;
+      if (!line) return;
+      ring.set(line.percent);
+      ring.el.querySelector(".ring-bar")?.setAttribute("stroke", tone(line.percent));
+      us.label.textContent = `Claude ${line.percent} %`;
+    },
+  };
+
+  const vo = glance("voice", "Parler à Tako", () => {
+    actions.blip();
+    VoiceUi.onListen();
+  });
+  vo.ico.append(proIcon("mic", 13, 2.2));
+  vo.label.textContent = "« Hey Tako »";
+  const voice: GlancePill = {
+    el: vo.el,
+    available: () => State.settings.voiceEnabled && !State.gameMode,
+    update() {},
+  };
+
+  const day = glance("today", "Aujourd'hui", () => actions.setView("today"));
+  day.ico.append(proIcon("calendar", 13, 2.2));
+  const today: GlancePill = {
+    el: day.el,
+    available: () => true,
+    update() {
+      day.label.textContent = shortDate(new Date());
+    },
+  };
+
+  const tm = glance("timer", "Lancer un minuteur", () => actions.setView("timer"));
+  tm.ico.append(proIcon("timer", 13, 2.2));
+  tm.label.textContent = "Minuteur";
+  const timer: GlancePill = {
+    el: tm.el,
+    available: () => !Timer.state,
+    update() {},
+  };
+
+  return [weather, usage, voice, today, timer];
 }
 
 export function privacyPill(): { el: HTMLElement; update(): void } {
