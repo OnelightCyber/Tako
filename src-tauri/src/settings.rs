@@ -112,6 +112,18 @@ pub struct Settings {
     pub mascot_alive: bool,
     #[serde(default)]
     pub calm_motion: bool,
+    #[serde(default = "default_squad_parallel")]
+    pub squad_parallel: u32,
+    #[serde(default = "default_one")]
+    pub night_parallel: u32,
+    #[serde(default = "default_one")]
+    pub night_hour: u32,
+    #[serde(default = "default_night_policy")]
+    pub night_policy: String,
+    #[serde(default = "default_true")]
+    pub night_keep_awake: bool,
+    #[serde(default = "default_true")]
+    pub night_briefing: bool,
 }
 
 fn default_scale() -> f64 {
@@ -215,6 +227,12 @@ impl Default for Settings {
             lens_enabled: true,
             mascot_alive: true,
             calm_motion: false,
+            squad_parallel: default_squad_parallel(),
+            night_parallel: default_one(),
+            night_hour: default_one(),
+            night_policy: default_night_policy(),
+            night_keep_awake: true,
+            night_briefing: true,
         }
     }
 }
@@ -224,6 +242,18 @@ pub fn config_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     base.join("Tako")
+}
+
+fn default_squad_parallel() -> u32 {
+    3
+}
+
+fn default_one() -> u32 {
+    1
+}
+
+fn default_night_policy() -> String {
+    "safe".into()
 }
 
 fn default_voice() -> String {

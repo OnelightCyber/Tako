@@ -208,6 +208,27 @@ export function listen() {
   State.notify();
 }
 
+export async function announce(text: string) {
+  if (!State.settings.voiceReplies || State.voicePhase !== "idle" || !island) return;
+  const words = plain(text);
+  if (!words) return;
+  const token = ++speakToken;
+  let url: string;
+  try {
+    url = await Bridge.voiceSay(words);
+  } catch {
+    return;
+  }
+  if (token !== speakToken) return;
+  island.voiceMood("speak");
+  try {
+    await play(url, token);
+  } catch {
+    island.voiceLevel(0);
+  }
+  if (token === speakToken) island.voiceMood("off");
+}
+
 export function stop() {
   flow++;
   if (awaiting) void Bridge.voiceCancel();

@@ -563,7 +563,7 @@ export class Island {
 
   openMission() {
     State.isPinned = true;
-    this.alert("mission");
+    this.alert("squad");
   }
 
   dropPin() {
@@ -1189,7 +1189,7 @@ export class Island {
     }
 
     if (this.lastSyncedView !== State.view) {
-      const typing = (v: string | null | undefined) => v === "prompt" || v === "mission";
+      const typing = (v: string | null | undefined) => v === "prompt" || v === "mission" || v === "squad";
       const wasTyping = typing(this.lastSyncedView);
       this.lastSyncedView = State.view;
       if (typing(State.view)) {

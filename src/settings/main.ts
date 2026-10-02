@@ -10,7 +10,7 @@ import { closeDropdowns } from "./dropdown";
 import { appearancePage, chatPage, claudePage, generalPage, homePage } from "./pages-core";
 import { gamePage, livePage, networkPage, notificationsPage, systemPage } from "./pages-modules";
 import { INTEGRATIONS, aboutPage, integrationsPage, usagePage } from "./pages-more";
-import { lensPage, voicePage } from "./pages-assist";
+import { lensPage, squadPage, voicePage } from "./pages-assist";
 import { pill, tile } from "./ui";
 
 interface SearchEntry {
@@ -38,6 +38,7 @@ function buildPage(id: PageId): Node[] {
     case "claude": return claudePage();
     case "chat": return chatPage();
     case "voice": return voicePage();
+    case "squad": return squadPage();
     case "usage": return usagePage();
     case "live": return livePage();
     case "notifications": return notificationsPage();

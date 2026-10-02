@@ -2,7 +2,7 @@ import type { BotEmoteName, BotStateName, IslandMode, IslandViewName, SizeHint }
 import type { EyeShape } from "../mascot/engine";
 import type { Activity } from "./activity";
 import type {
-  BtEvent, ContextInfo, DownloadInfo, NetworkInfo, NoticeInfo, PowerInfo, PrivacyInfo, SystemStats, Track, TurnSummary,
+  BtEvent, ContextInfo, DownloadInfo, NetworkInfo, NoticeInfo, PowerInfo, PrivacyInfo, SquadJob, SquadReport, SystemStats, Track, TurnSummary,
   UsageAlert, UsageReport, VpnEvent, WeatherInfo,
 } from "./bridge";
 import type { DiffLine } from "./activity";
@@ -176,6 +176,12 @@ export interface Settings {
   lensEnabled: boolean;
   mascotAlive: boolean;
   calmMotion: boolean;
+  squadParallel: number;
+  nightParallel: number;
+  nightHour: number;
+  nightPolicy: "safe" | "auto";
+  nightKeepAwake: boolean;
+  nightBriefing: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -238,6 +244,12 @@ export const DEFAULT_SETTINGS: Settings = {
   lensEnabled: true,
   mascotAlive: true,
   calmMotion: false,
+  squadParallel: 3,
+  nightParallel: 1,
+  nightHour: 1,
+  nightPolicy: "safe",
+  nightKeepAwake: true,
+  nightBriefing: true,
 };
 
 export type VoicePhase = "idle" | "listening" | "thinking" | "speaking";
@@ -309,6 +321,10 @@ class AppState {
   voiceAnswer = "";
   voiceFailed = false;
   missionDraft: string | null = null;
+  squad: SquadJob[] = [];
+  squadReport: SquadReport | null = null;
+  nightArmed = false;
+  dawnPending = false;
   livePreferred: string | null = null;
   audioPeak = 0;
 

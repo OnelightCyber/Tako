@@ -4,6 +4,7 @@ import "./extra.css";
 import "./live.css";
 import "./hud.css";
 import "./alive.css";
+import "./squad.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
@@ -15,6 +16,7 @@ import { registerLive } from "./island/live";
 import { registerSystem } from "./island/system";
 import { registerVoice } from "./island/voice";
 import { registerLens } from "./island/lens";
+import { registerSquad } from "./island/squad";
 
 async function main() {
   const root = document.getElementById("root");
@@ -79,6 +81,7 @@ async function main() {
   registerSystem(island);
   registerVoice(island);
   registerLens(island);
+  registerSquad(island);
   registerIntegrationHandlers(island);
 
   island.launch();

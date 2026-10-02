@@ -17,6 +17,8 @@ import { buildBluetooth, buildTimer, buildVpn, timerPill } from "./live";
 import { buildNotifications, glancePills, homeCard, noticePill, privacyPill } from "./hub";
 import { buildToday } from "./today";
 import { buildVoice } from "./voice";
+import { buildSquad } from "./squad";
+import { buildDawn } from "./dawn";
 import { Timer } from "../core/timer";
 
 export interface ViewActions {
@@ -89,7 +91,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
   }, svg(ICONS.house, 13));
   const tabChat = h("button", { class: "tab", title: "Demander à Claude", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Déposer un fichier", onclick: () => go("upload") }, svg(ICONS.plus, 13));
-  const tabMission = h("button", { class: "tab", title: "Mission", onclick: () => go("mission") }, proIcon("rocket", 13, 2));
+  const missionBadge = h("i", { class: "tab-badge" });
+  const tabMission = h("button", { class: "tab", title: "Mission Control", onclick: () => go("squad") }, proIcon("rocket", 13, 2), missionBadge);
   const tabTimer = h("button", { class: "tab", title: "Minuteur", onclick: () => go("timer") }, proIcon("timer", 13, 2));
   const bellBadge = h("i", { class: "tab-badge" });
   const tabBell = h("button", { class: "tab", title: "Notifications", onclick: () => go("notifications") }, proIcon("bell", 13, 2), bellBadge);
@@ -116,7 +119,11 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabHome.classList.toggle("on", v === "overview" || v === "empty" || v === "session");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
-      tabMission.classList.toggle("on", v === "mission");
+      tabMission.classList.toggle("on", v === "mission" || v === "squad" || v === "dawn");
+      const ready = State.squad.filter((j) => j.status === "done" || j.status === "waiting").length;
+      missionBadge.textContent = ready ? String(ready) : "";
+      missionBadge.style.display = ready && v !== "squad" ? "" : "none";
+      tabMission.classList.toggle("live", State.squad.some((j) => j.status === "running"));
       tabTimer.classList.toggle("on", v === "timer");
       tabTimer.classList.toggle("live", Timer.active);
       tabBell.classList.toggle("on", v === "notifications");
@@ -557,6 +564,8 @@ export function buildViews(
   map.set("notifications", buildNotifications(actions));
   map.set("today", buildToday(actions));
   map.set("voice", buildVoice(actions));
+  map.set("squad", buildSquad(actions));
+  map.set("dawn", buildDawn(actions));
 
   map.set("mail", buildPlaceholder("L'envoi par e-mail arrive bientôt.", ""));
   map.set("searching", buildPlaceholder("Claude cherche…", ""));

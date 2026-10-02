@@ -124,6 +124,14 @@ export const Bridge = {
   sttStatus: () => call<SttStatus>("stt_status"),
   sttDownload: () => call<void>("stt_download"),
   ttsStatus: (voice: string) => call<TtsStatus>("tts_status", { voice }),
+  squadBoard: () => call<SquadBoard>("squad_board"),
+  squadAdd: (repo: string, task: string, night: boolean) => callOrThrow<SquadBoard>("squad_add", { repo, task, night }),
+  squadAction: (id: string, action: "stop" | "discard" | "merge" | "diff" | "open" | "reply", text?: string) =>
+    callOrThrow<string>("squad_action", { id, action, text: text ?? null }),
+  squadNightNow: () => call<void>("squad_night_now"),
+  squadClear: () => call<void>("squad_clear"),
+  squadReportSeen: () => call<void>("squad_report_seen"),
+  idleMs: () => call<number>("idle_ms"),
   ttsDownload: (voice: string) => call<void>("tts_download", { voice }),
   voiceSay: (text: string) => callOrThrow<string>("voice_say", { text }),
 };
@@ -139,6 +147,44 @@ export interface SttStatus {
   downloading: boolean;
   received: number;
   total: number;
+}
+
+export type SquadStatus = "queued" | "running" | "waiting" | "done" | "empty" | "failed" | "merged" | "discarded";
+
+export interface SquadJob {
+  id: string;
+  repo: string;
+  task: string;
+  branch: string;
+  base: string;
+  baseCommit: string;
+  worktree: string;
+  agent: string | null;
+  session: string | null;
+  status: SquadStatus;
+  night: boolean;
+  created: number;
+  started: number | null;
+  finished: number | null;
+  files: number;
+  added: number;
+  removed: number;
+  note: string;
+}
+
+export interface SquadReport {
+  at: number;
+  done: number;
+  empty: number;
+  failed: number;
+  jobs: string[];
+  seen: boolean;
+}
+
+export interface SquadBoard {
+  jobs: SquadJob[];
+  report: SquadReport | null;
+  nightArmed: boolean;
 }
 
 export interface TtsStatus {

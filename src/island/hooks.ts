@@ -4,6 +4,8 @@ import { colorForProject } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State, type AgentTask, type ApprovalInfo, type ReviewPreview } from "../core/state";
 import type { Island } from "./island";
+import { shortTask, squadJobFor } from "../views/squad";
+import { nightDeny } from "./squad";
 
 export interface HookPayload {
   hook_event_name?: string;
@@ -136,7 +138,8 @@ function prune() {
 function sessionTask(payload: HookPayload): AgentTask {
   const sid = payload.session_id || "default";
   const cwd = payload.cwd ?? "";
-  const name = aliasProjectName(lastPathComponent(cwd) || "Session");
+  const job = squadJobFor(cwd);
+  const name = job ? shortTask(job.task, 28) : aliasProjectName(lastPathComponent(cwd) || "Session");
   let task = State.sessionTask(sid);
   if (!task) {
     prune();
@@ -427,9 +430,18 @@ export function handleHook(island: Island, payload: HookPayload) {
   }
 
   const task = sessionTask(payload);
+  const fromSquad = payload.tako_origin === "squad" || !!squadJobFor(task.sessionCwd);
   const focused = () => isFocused(task);
 
+  if (fromSquad && name === "PermissionRequest" && payload.request_id && nightDeny(task.sessionCwd)) {
+    void Bridge.approvalAck(payload.request_id);
+    void Bridge.approvalDecision(payload.request_id, "deny");
+    State.appendStep(task.id, "Action refusée pendant la nuit");
+    return;
+  }
+
   const surface = (view: Parameters<Island["alert"]>[0], isAlert: boolean) => {
+    if (fromSquad) return;
     if (State.mode === "expanded") {
       if (isAlert) island.setView(view);
     } else if (isAlert) {
@@ -441,13 +453,13 @@ export function handleHook(island: Island, payload: HookPayload) {
 
   switch (name) {
     case "SessionStart":
-      claimFocus(task);
+      if (!fromSquad) claimFocus(task);
       surface("overview", false);
       Sound.play("work");
       break;
 
     case "UserPromptSubmit": {
-      claimFocus(task);
+      if (!fromSquad) claimFocus(task);
       task.state = "thinking";
       task.pillBadge = null;
       const asked = promptText(payload.prompt ?? payload.user_prompt ?? payload.message);
@@ -458,7 +470,7 @@ export function handleHook(island: Island, payload: HookPayload) {
     }
 
     case "PreToolUse": {
-      if (task.state === "idle" || task.state === "finished") claimFocus(task);
+      if (!fromSquad && (task.state === "idle" || task.state === "finished")) claimFocus(task);
       task.state = "working";
       const tool = payload.tool_name ?? "Tool";
       State.appendStep(task.id, stepLabel(tool, payload.tool_input ?? {}));
@@ -528,7 +540,7 @@ export function handleHook(island: Island, payload: HookPayload) {
       const final = (payload.last_assistant_message ?? payload.message ?? "").replace(/\s+/g, " ").trim();
       task.finalMessage = final ? final.slice(0, 240) : null;
       if (payload.message) State.appendStep(task.id, payload.message.slice(0, 60));
-      Sound.play("finish");
+      if (!fromSquad) Sound.play("finish");
 
       const watching = State.mode === "expanded" && State.view === "session" && focused();
       if (focused() && State.settings.openOnFinish && !watching) surface("finished", true);

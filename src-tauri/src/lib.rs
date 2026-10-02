@@ -24,6 +24,7 @@ mod privacy;
 mod secrets;
 mod sessions;
 mod settings;
+mod squad;
 mod stt;
 mod sysstats;
 mod tray;
@@ -183,6 +184,59 @@ fn voice_listen() {
 #[tauri::command]
 fn voice_cancel() {
     voice::cancel();
+}
+
+#[tauri::command]
+fn idle_ms() -> u64 {
+    use windows::Win32::System::SystemInformation::GetTickCount;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    unsafe {
+        if !GetLastInputInfo(&mut info).as_bool() {
+            return u64::MAX;
+        }
+        GetTickCount().wrapping_sub(info.dwTime) as u64
+    }
+}
+
+#[tauri::command]
+fn squad_board() -> squad::Board {
+    squad::board()
+}
+
+#[tauri::command]
+async fn squad_add(app: AppHandle, repo: String, task: String, night: bool) -> Result<squad::Board, String> {
+    tauri::async_runtime::spawn_blocking(move || squad::add(&app, &repo, &task, night)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn squad_action(app: AppHandle, id: String, action: String, text: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || match action.as_str() {
+        "stop" => squad::stop(&app, &id).map(|_| String::new()),
+        "discard" => squad::discard(&app, &id).map(|_| String::new()),
+        "merge" => squad::merge(&app, &id),
+        "diff" => squad::diff(&id).map(|_| String::new()),
+        "open" => squad::open(&id).map(|_| String::new()),
+        "reply" => squad::reply(&app, &id, text.as_deref().unwrap_or("")).map(|_| String::new()),
+        _ => Err("Action inconnue.".into()),
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn squad_night_now(app: AppHandle) {
+    std::thread::spawn(move || squad::run_night_now(&app));
+}
+
+#[tauri::command]
+fn squad_clear(app: AppHandle) {
+    squad::clear_finished(&app);
+}
+
+#[tauri::command]
+fn squad_report_seen(app: AppHandle) {
+    squad::seen_report(&app);
 }
 
 #[tauri::command]
@@ -828,6 +882,13 @@ pub fn run() {
             voice_cancel,
             stt_status,
             stt_download,
+            squad_board,
+            idle_ms,
+            squad_add,
+            squad_action,
+            squad_night_now,
+            squad_clear,
+            squad_report_seen,
             tts_status,
             tts_download,
             voice_say,
@@ -912,6 +973,7 @@ pub fn run() {
             notify::start(handle.clone());
             weather::start(handle.clone());
             voice::start(handle.clone());
+            squad::start(handle.clone());
             clipboard::start(handle.clone());
             apply_features(&handle, &loaded);
             Ok(())

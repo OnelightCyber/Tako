@@ -165,6 +165,27 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
 - **Surveillance du VPN** : Mullvad, WireGuard, NordVPN, Proton… si le tunnel tombe, une alerte rouge te prévient que
   ton IP réelle est visible ; quand il revient, une verte avec le lieu.
 
+### Mission Control
+
+- **Plusieurs Claude à la fois** : écris une tâche, choisis le projet, et un Claude s'y met en arrière-plan, dans sa
+  propre copie du projet (un worktree git dans `.claude/worktrees`, créé depuis ton commit actuel). Jusqu'à quatre en
+  même temps, et tu vois chacun travailler en direct dans l'îlot.
+- **Relire, puis fusionner** : une mission finie montre son diff et ses lignes. **Fusionner** commite son travail et
+  le fusionne dans ta branche en un clic ; **Jeter** supprime sa copie. Ton dossier ne bouge pas tant que tu n'as pas
+  fusionné, et Tako s'arrête et annule tout en cas de conflit ou si tu as des modifications non commitées.
+- **Reprendre la main** : une mission qui attend une réponse, ou que tu veux pousser plus loin, s'ouvre dans un
+  terminal.
+
+### L'équipe de nuit
+
+- **Des tâches pour cette nuit** : choisis « Cette nuit » dans Mission Control. Dès l'heure choisie (1 h par défaut)
+  et jusqu'à 7 h, Claude les enchaîne une par une pendant que le PC reste éveillé.
+- **Prudente par défaut** : personne ne peut répondre la nuit, donc les missions de nuit n'ont droit qu'aux
+  modifications de fichiers, aux tests, aux builds et à git en lecture ; tout le reste est refusé tout de suite (le
+  mode `dontAsk` de Claude Code). Le mode auto de Claude est en option.
+- **Le briefing du matin** : à ton retour, l'îlot s'ouvre sur le rapport de la nuit et Tako te le lit : ce qui est
+  prêt à fusionner et ce qui a bloqué.
+
 ### Tako en mode Jarvis
 
 - **« Hey Tako »** : dis-le et l'îlot s'ouvre, le personnage penche la tête et t'écoute, avec des barres qui suivent
@@ -475,6 +496,7 @@ src-tauri/src/            backend Rust
   media.rs                ce qui joue (sessions média Windows)
   voice.rs                « Hey Tako », écoute, réponses à voix haute
   tts.rs, assets.rs       voix naturelles Piper, téléchargements vérifiés
+  squad.rs                Mission Control et l'équipe de nuit : worktrees, agents en fond, fusion
   mic.rs, stt.rs          capture du micro, fin de phrase, Whisper en local
   clipboard.rs            la Lentille : ce que tu copies, reconnu sur place
   sysstats.rs             processeur, mémoire, carte graphique
@@ -512,6 +534,7 @@ docs/                     bannière, GIF et captures
 - [x] Alertes de limite, prévision et historique ; musique ; stats du PC
 - [x] **Îlot multifonction** : HUD à l'iPhone, notifications, appels, téléchargements, météo
 - [x] **Mode Jarvis**, **Lentille**, personnage vivant et animations à la Apple
+- [x] **Mission Control** et **l'équipe de nuit**
 - [ ] Réglages en anglais
 - [ ] **Monitoring serveurs** : up / down, CPU, RAM, disque, conteneurs
 - [ ] **Garde-fous de session** : bloquer les commandes dangereuses, signaler l'accès aux secrets

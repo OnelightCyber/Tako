@@ -103,12 +103,12 @@ export function homePage(): Node[] {
 
   const news = group({ title: "Nouveau dans Tako", icon: "sparkles", tone: "purple" },
     h("div", { class: "wn-grid" },
+      whatsNew("rocket", "indigo", "Mission Control", "Plusieurs Claude en même temps, chacun dans sa copie du projet. Tu relis, tu fusionnes en un clic."),
+      whatsNew("moon", "purple", "L'équipe de nuit", "Des tâches pour la nuit, et au réveil Tako te lit ce qui est prêt à fusionner."),
       whatsNew("mic", "orange", "Tako en mode Jarvis", "Dis « Hey Tako », pose ta question : Claude te répond à voix haute. « Tako, oui » valide une permission."),
       whatsNew("clipboard", "cyan", "La Lentille", "Copie une erreur, un texte anglais, un numéro de colis ou une adresse : l'îlot propose la bonne action."),
       whatsNew("music", "pink", "Un perso vivant", "Il danse sur ta musique, transpire quand le PC chauffe, dort la nuit et fête tes tests qui passent."),
       whatsNew("layers", "green", "Animations à la Apple", "Effet gelée, appui long, Maj + molette pour changer d'activité, couleurs de la pochette."),
-      whatsNew("calendar", "amber", "Les deux côtés de l'îlot", "À gauche la date et la météo (ou ce que fait Claude), à droite l'heure ou tes notifications."),
-      whatsNew("bell", "red", "Tes notifications", "Discord, WhatsApp, Outlook… arrivent en haut, avec l'icône de l'appli."),
     ),
   );
 

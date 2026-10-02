@@ -10,6 +10,7 @@ export type PageId =
   | "claude"
   | "chat"
   | "voice"
+  | "squad"
   | "usage"
   | "live"
   | "notifications"
@@ -58,6 +59,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
       { id: "claude", label: "Claude Code", icon: "code", tone: "orange" },
       { id: "chat", label: "Chat & agent", icon: "chat", tone: "blue" },
       { id: "voice", label: "Assistant vocal", icon: "mic", tone: "orange" },
+      { id: "squad", label: "Mission Control", icon: "rocket", tone: "indigo" },
       { id: "usage", label: "Utilisation", icon: "gauge", tone: "amber" },
     ],
   },

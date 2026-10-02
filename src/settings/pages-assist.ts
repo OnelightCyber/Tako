@@ -2,7 +2,7 @@ import { Bridge, onEvent, type SttProgress, type SttStatus, type TtsProgress, ty
 import { dropdown } from "./dropdown";
 import { h, clear } from "../views/dom";
 import { app, set } from "./ctx";
-import { button, group, inline, pageHead, pill, row, testButton, toggle, whenShown } from "./ui";
+import { button, group, inline, pageHead, pill, row, segmented, testButton, toggle, whenShown } from "./ui";
 
 let modelHost: HTMLElement | null = null;
 let listening = false;
@@ -171,6 +171,28 @@ export function voicePage(): Node[] {
     group({ title: "Bon à savoir", icon: "info", tone: "gray" },
       h("p", { class: "group-note", text: "Attends le petit bip après « Hey Tako », puis parle normalement : Tako s'arrête d'écouter dès que tu te tais." }),
       h("p", { class: "group-note", text: "Pendant que Tako t'écoute ou te répond, la musique se met en pause puis reprend toute seule." }),
+    ),
+  ];
+}
+
+export function squadPage(): Node[] {
+  const c = app.ctx;
+  const hours = [22, 23, 0, 1, 2, 3].map((n) => ({ value: String(n), label: `${n} h` }));
+  return [
+    pageHead("rocket", "indigo", "Mission Control", "Plusieurs Claude en même temps, et une équipe de nuit qui avance pendant que tu dors."),
+    group({ title: "Missions en parallèle", icon: "rocket", tone: "indigo", note: "Chaque mission travaille dans sa propre copie du projet (un worktree git dans .claude/worktrees). Ton dossier ne bouge pas tant que tu n'as pas cliqué sur Fusionner, et Tako s'arrête net en cas de conflit." },
+      row({ icon: "layers", tone: "indigo", title: "Claude en même temps", desc: "Au-delà, les missions attendent leur tour.", keywords: "parallèle agents worktree squad",
+        control: segmented(["1", "2", "3", "4"].map((v) => ({ value: v, label: v })), String(c.settings.squadParallel), (v) => set("squadParallel", Number(v))) }),
+    ),
+    group({ title: "Équipe de nuit", icon: "moon", tone: "purple", note: "Dans Mission Control, choisis « Cette nuit » avant d'ajouter une tâche. Au réveil, Tako te dit ce qui est prêt à fusionner et ce qui a bloqué." },
+      row({ icon: "clock", tone: "purple", title: "Début de la nuit", desc: "Les tâches démarrent à cette heure-là, jusqu'à 7 h.", keywords: "heure nuit planifier",
+        control: dropdown(hours, String(c.settings.nightHour), (v) => set("nightHour", Number(v))) }),
+      row({ icon: "shieldCheck", tone: "green", title: "Prudence", desc: c.settings.nightPolicy === "auto" ? "Mode auto de Claude : son classifieur décide, ce qu'il refuse attend le matin." : "Prudent : modifications de fichiers, tests, builds et git en lecture. Tout le reste est refusé sans attendre.", keywords: "permissions sécurité dontAsk auto",
+        control: segmented([{ value: "safe", label: "Prudent" }, { value: "auto", label: "Mode auto" }], c.settings.nightPolicy, (v) => set("nightPolicy", v)) }),
+      row({ icon: "bolt", tone: "amber", title: "Garder le PC éveillé", desc: "Empêche la mise en veille tant que l'équipe de nuit travaille (l'écran peut s'éteindre).", keywords: "veille sommeil",
+        control: toggle(c.settings.nightKeepAwake, (v) => set("nightKeepAwake", v)) }),
+      row({ icon: "speaker", tone: "pink", title: "Briefing du matin à voix haute", desc: "Quand tu reviens, Tako lit le rapport de la nuit (avec l'assistant vocal activé).", keywords: "rapport matin voix",
+        control: toggle(c.settings.nightBriefing, (v) => set("nightBriefing", v)) }),
     ),
   ];
 }

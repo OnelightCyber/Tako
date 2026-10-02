@@ -161,6 +161,26 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
 - **VPN watch**: Mullvad, WireGuard, NordVPN, Proton… if the tunnel drops, a red alert tells you your real IP is
   visible; when it's back, a green one with the location.
 
+### Mission Control
+
+- **Several Claudes at once**: write a task, pick the project, and a Claude starts on it in the background, in its
+  own copy of the project (a git worktree in `.claude/worktrees`, made from your current commit). Run up to four
+  side by side and watch each one work, live, in the island.
+- **Review, then merge**: a mission that's done shows its diff and its line count. **Merge** commits its work and
+  merges it into your branch in one click; **Discard** deletes its copy. Your folder never changes until you merge,
+  and Tako stops and undoes everything on a conflict or when you have uncommitted changes.
+- **Take over at any time**: a mission waiting for an answer, or one you want to push further, opens in a terminal.
+
+### The night shift
+
+- **Queue tasks for tonight**: pick "Tonight" in Mission Control. From the hour you choose (1 a.m. by default) until
+  7 a.m., Claude works through them one by one while the PC stays awake.
+- **Careful by default**: nobody can answer at night, so night missions only get file edits, tests, builds and
+  read-only git; anything else is refused straight away (Claude Code's `dontAsk` mode). Claude's auto mode is an
+  option.
+- **The morning briefing**: when you're back, the island opens on the night's report, and Tako reads it to you:
+  what's ready to merge and what got stuck.
+
 ### Tako as Jarvis
 
 - **"Hey Tako"**: say it and the island opens, the character tilts its head and listens, with bars that follow your
@@ -468,6 +488,7 @@ src-tauri/src/            Rust backend
   media.rs                what's playing (Windows media sessions)
   voice.rs                "Hey Tako", listening, answers read aloud
   tts.rs, assets.rs       Piper natural voices, verified downloads
+  squad.rs                Mission Control and the night shift: worktrees, background agents, merging
   mic.rs, stt.rs          microphone capture, end of speech, local Whisper
   clipboard.rs            the Lens: what you copy, recognised locally
   sysstats.rs             CPU, memory, GPU
@@ -505,6 +526,7 @@ docs/                     banner, GIF and screenshots
 - [x] Limit alerts, forecast and history; music; PC stats
 - [x] **Multi-purpose island**: iPhone-style HUDs, notifications, calls, downloads, weather
 - [x] **Jarvis mode**, **the Lens**, a living character and Apple-grade motion
+- [x] **Mission Control** and **the night shift**
 - [ ] English settings window
 - [ ] **Server monitoring**: up / down, CPU, RAM, disk, containers
 - [ ] **Session guardrails**: block dangerous commands, flag access to secrets

@@ -1,5 +1,6 @@
 import type { Island } from "../src/island/island";
 import { State, type AgentTask } from "../src/core/state";
+import type { SquadJob } from "../src/core/bridge";
 import { colorForProject } from "../src/core/layout";
 import { testLens } from "../src/island/lens";
 import { VoiceUi } from "../src/views/voice";
@@ -22,13 +23,46 @@ function busy(): AgentTask {
   };
 }
 
+function job(id: string, task: string, status: SquadJob["status"], extra: Partial<SquadJob> = {}): SquadJob {
+  return {
+    id, repo: String.raw`C:\Users\dev\Desktop\Tako`, task, branch: `tako/${id}`, base: "main", baseCommit: "1bd3bb8",
+    worktree: String.raw`C:\Users\dev\Desktop\Tako\.claude\worktrees\tako-` + id, agent: "6838f2e6", session: null, status,
+    night: false, created: Date.now(), started: Date.now(), finished: null, files: 0, added: 0, removed: 0, note: "", ...extra,
+  };
+}
+
+function seedSquad() {
+  State.settings.recentProjects = [String.raw`C:\Users\dev\Desktop\Tako`, String.raw`C:\Users\dev\projects\breachhub`];
+  State.squad = [
+    job("tests-paiement-1a2b", "Ajoute des tests sur le module de paiement", "done", { files: 3, added: 42, removed: 5 }),
+    job("fix-slot-gauche-77c1", "Corrige le chevauchement du slot gauche dans l'îlot replié", "running", { files: 1, added: 8, removed: 2 }),
+    job("readme-anglais-0f3e", "Traduis la section sécurité du README en anglais", "waiting", { note: "" }),
+    job("perf-whisper-5d10", "Accélère le chargement du modèle Whisper", "queued", { night: true }),
+  ];
+}
+
 export function runAliveDemo(island: Island, kind: string) {
   (window as unknown as { __island: Island; __state: typeof State }).__island = island;
   (window as unknown as { __state: typeof State }).__state = State;
   State.weather = { city: "Paris", temp: 14.2, code: 3, isDay: true, max: 17, min: 9, wind: 12, humidity: 71, days: [] };
   State.settings.voiceEnabled = kind.startsWith("voice") || kind === "glance-mic";
   window.setTimeout(() => {
-    if (kind === "overview") {
+    if (kind === "squad") {
+      seedSquad();
+      island.setView("squad");
+    } else if (kind === "squad-empty") {
+      State.settings.recentProjects = [String.raw`C:\Users\dev\Desktop\Tako`];
+      island.setView("squad");
+    } else if (kind === "dawn") {
+      seedSquad();
+      State.squad = [
+        job("tests-paiement-1a2b", "Ajoute des tests sur le module de paiement", "done", { files: 3, added: 42, removed: 5, night: false }),
+        job("perf-whisper-5d10", "Accélère le chargement du modèle Whisper", "done", { files: 2, added: 17, removed: 9 }),
+        job("deps-update-9a9a", "Mets à jour les dépendances npm", "empty", { note: "Claude s'est arrêté sur une action refusée ou une question." }),
+      ];
+      State.squadReport = { at: Date.now(), done: 2, empty: 1, failed: 0, jobs: State.squad.map((j) => j.id), seen: true };
+      island.alert("dawn");
+    } else if (kind === "overview") {
       State.stats = { cpu: 13, ram: 48, ramUsedGb: 7.6, ramTotalGb: 16, gpu: 4 };
       State.usage = { lines: [{ label: "Current session", percent: 34, resets: "" }], subscription: true, fetchedAt: Date.now() };
       State.settings.voiceEnabled = true;
