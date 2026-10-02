@@ -23,7 +23,7 @@ pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 pub fn ingest_bytes(name: &str, bytes: &[u8]) -> Result<DroppedFile, String> {
     if bytes.len() > MAX_BYTES {
-        return Err("This file is too big to drop.".into());
+        return Err("Ce fichier est trop lourd pour être déposé.".into());
     }
     let clean = Path::new(name)
         .file_name()
@@ -63,7 +63,7 @@ pub fn ingest(source: &str) -> Result<DroppedFile, String> {
     let src = Path::new(source);
     let meta = std::fs::metadata(src).map_err(|e| format!("cannot read {source}: {e}"))?;
     if meta.is_dir() {
-        return Err("Folders can't be dropped yet.".into());
+        return Err("Les dossiers ne peuvent pas encore être déposés.".into());
     }
 
     let dir = inbox_dir();

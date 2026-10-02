@@ -71,8 +71,8 @@ const KIND: Record<string, ActivityKind> = {
 };
 
 const LABEL: Record<ActivityKind, string> = {
-  edit: "Edit", write: "Write", read: "Read", shell: "Shell", search: "Search",
-  web: "Web", agent: "Agent", todo: "Plan", other: "Tool",
+  edit: "Modifie", write: "Écrit", read: "Lit", shell: "Commande", search: "Cherche",
+  web: "Web", agent: "Agent", todo: "Plan", other: "Outil",
 };
 
 let seq = 0;
@@ -88,7 +88,7 @@ export function activityFromPre(
     id: toolUseId || `a${++seq}`,
     tool,
     kind,
-    label: browser ? "Browser" : tool === "mcp__tako__screenshot" ? "Screen" : kind === "other" ? prettyTool(tool) : LABEL[kind],
+    label: browser ? "Navigateur" : tool === "mcp__tako__screenshot" ? "Écran" : kind === "other" ? prettyTool(tool) : LABEL[kind],
     target: "",
     status: "running",
     startedAt: Date.now(),

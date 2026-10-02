@@ -122,8 +122,9 @@ n'existait pas.
 ### Agent navigateur
 
 Active l'agent et le chat pilote un **vrai navigateur** (Playwright) : il ouvre des sites, lit les pages, clique,
-remplit des formulaires. Tako lance ton propre Chrome (ou Edge) avec un profil à lui et le chat s'y connecte : la
-fenêtre **reste ouverte** entre les messages et après chaque réponse — c'est toi qui la fermes. Par défaut,
+remplit des formulaires. Chrome (ou Edge) ne se lance que quand le chat a vraiment besoin d'une page — une simple
+question ne l'ouvre jamais — avec un profil à lui, et la fenêtre **reste ouverte** entre les messages et après
+chaque réponse — c'est toi qui la fermes. Par défaut,
 chaque action qui agit — ouvrir une page, cliquer, taper, exécuter du JavaScript — t'est demandée dans l'îlot avec
 l'URL ou le texte exact ; le **mode auto** laisse tout passer.
 
@@ -140,8 +141,17 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
 
 ### Une vraie Dynamic Island
 
-- **Musique en cours** : Spotify, YouTube, Deezer… avec la pochette, précédent / lecture / suivant et la barre de
-  progression, et un mini égaliseur dans l'îlot replié.
+- **L'îlot s'étire comme sur iPhone** : volume, Verr. Maj, charge et batterie faible, clé USB branchée (avec
+  « Ouvrir »), connexion perdue puis rétablie, téléchargement terminé (Ouvrir / Dossier) — l'îlot grandit une
+  seconde, liseré de la couleur de l'événement, puis se replie.
+- **Tes notifications** : Discord, WhatsApp, Outlook, Teams… arrivent en haut avec l'icône de l'appli, et l'onglet
+  cloche les garde toutes. Un clic ouvre l'appli ; masque une appli en un clic ; un mode privé cache le texte.
+- **Appels** : Discord, Teams, Zoom… utilisent ton micro et l'îlot affiche la durée de l'appel. Un point orange quand
+  une appli utilise le micro, vert pour la caméra — survole-le pour savoir laquelle.
+- **Aujourd'hui** : l'heure, la date et la météo dans l'îlot, et un clic ouvre le mois et les prévisions sur 5 jours.
+- **Musique en cours** : Spotify, YouTube, Deezer… avec la pochette, précédent / lecture / suivant, la barre de
+  progression et des barres qui suivent le vrai son de ton PC.
+- **Plus grand pour les écrans de PC** : trois tailles dans les réglages, tout grandit d'un coup.
 - **Ton PC** : processeur, mémoire et carte graphique en direct, dans une pastille.
 - **L'îlot se divise en deux** : quand deux choses tournent en même temps — Claude qui bosse et un minuteur, un
   minuteur et la musique — une petite bulle se détache de l'îlot comme une goutte, avec une animation gluante.
@@ -160,8 +170,8 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
   fichier approche du haut de l'écran.
 - **Intégrations** : GitHub, Vercel, n8n, Resend, Notion, Cal.com, Stripe — jusqu'à 4 pastilles à côté du
   personnage, clés rangées dans le Gestionnaire d'identification Windows.
-- **Réglages complets** : état de chaque brique, hooks avec diff avant écriture, chat, vision, agent,
-  intégrations, sons, comportement, mises à jour.
+- **Réglages complets** : refaits de zéro, une page par module avec un bouton « Tester » partout, et une recherche
+  qui retrouve n'importe quel réglage.
 - **Discret** : compact quand Claude bosse, ouvert au clic, replié tout seul, et une option pour ne pas s'ouvrir
   quand Claude a fini — pratique en jeu. Pas de fenêtre dans la barre des tâches, pas de console.
 

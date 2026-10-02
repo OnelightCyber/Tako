@@ -5,6 +5,9 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 use crate::settings;
 
 pub fn line(message: impl AsRef<str>) {
+    if cfg!(test) {
+        return;
+    }
     let t = unsafe { GetLocalTime() };
     let stamp = format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",

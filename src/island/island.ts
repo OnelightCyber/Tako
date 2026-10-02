@@ -1,11 +1,12 @@
 import { Tracked, Spring, clamp } from "../core/anim";
 import { Bridge, IS_TAURI } from "../core/bridge";
 import {
-  EXPANDED_CORNER, EXPANDED_W, NOTCH_W, PANEL_H, PANEL_W,
+  COMPACT_W, EXPANDED_CORNER, EXPANDED_W, NOTCH_H, NOTCH_W, PANEL_H, PANEL_W,
   ROUNDED_CORNER, VIEW_LAYOUTS, botGlowColor, botGlowOpacity, botPosition, chatPromptHeight,
   islandSize,
   type IslandMode, type IslandViewName,
 } from "../core/layout";
+import { Hud, type HudSpec } from "../core/hud";
 import { Sound } from "../core/sound";
 import { PLACEHOLDER_ID, State } from "../core/state";
 import { BotEngine, hexToRGB } from "../mascot/engine";
@@ -17,8 +18,12 @@ import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../vie
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
 import { decideCurrent } from "./hooks";
-import { LiveLayer, busySession, type LiveKind } from "./bubble";
+import { LiveLayer, busySession, musicLive, type LiveKind } from "./bubble";
+import { HudLayer, hudSize } from "./hud";
 import { Timer } from "../core/timer";
+import { feedViz, idleViz, vizEl } from "../views/viz";
+import { proIcon } from "../views/pro-icons";
+import { weatherIcon, weatherTone } from "../views/weather";
 
 const BOT_OVERHANG = 40;
 
@@ -46,6 +51,9 @@ export class Island {
   private miniGrid!: HTMLElement;
   private mediaStrip!: HTMLElement;
   private live!: LiveLayer;
+  private hudLayer!: HudLayer;
+  private dots!: HTMLElement;
+  private trail!: HTMLElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -67,6 +75,8 @@ export class Island {
   private lastFrame = 0;
   private dirty = true;
   private canvasPx = 0;
+  private canvasDpr = 0;
+  private greetingDpr = 0;
 
   private collapsed = false;
   private collapseTimer: number | null = null;
@@ -86,6 +96,14 @@ export class Island {
 
   private uploadTens = 0;
   private uploadDone = false;
+
+  private hudRevealed = false;
+  private quietReveal = false;
+  private livePrimary: LiveKind | null = null;
+  private wasSettling = false;
+  private metering = false;
+  private dotsKey = "";
+  private trailKey = "";
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -161,7 +179,22 @@ export class Island {
     this.miniGrid = h("div", { id: "mini-grid" });
     this.mediaStrip = h("div", { id: "media-strip" });
     this.countdown = h("div", { id: "countdown" });
+    this.dots = h("div", { id: "privacy-dots" });
+    this.trail = h("div", { id: "trail" });
+    this.trail.addEventListener("mousedown", (e) => {
+      const kind = this.trail.dataset.kind;
+      if (!kind) return;
+      e.stopPropagation();
+      Sound.play("blip");
+      this.setView(kind === "bell" ? "notifications" : "today");
+    });
+    window.setInterval(() => {
+      if (State.mode !== "compact" || this.trail.dataset.kind !== "clock") return;
+      this.dirty = true;
+      this.ensureRunning();
+    }, 15_000);
 
+    this.hudLayer = new HudLayer();
     this.header = buildHeader(actions);
     this.views = buildViews(actions, () => this.animateGeometry(false));
     this.viewsEl = h("div", { id: "views" });
@@ -184,6 +217,7 @@ export class Island {
       this.greetingCanvas,
       this.uploadCanvas.el,
       this.contentEl,
+      this.hudLayer.el,
     );
     this.islandEl = h(
       "div",
@@ -194,20 +228,48 @@ export class Island {
       this.miniGrid,
       this.mediaStrip,
       this.countdown,
+      this.trail,
+      this.dots,
     );
 
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.greetingCanvas.width = Math.round(EXPANDED_W * dpr);
-    this.greetingCanvas.height = Math.round(150 * dpr);
-    this.greetingCanvas.style.width = `${EXPANDED_W}px`;
-    this.greetingCanvas.style.height = "150px";
+    this.sizeGreeting();
 
     this.live = new LiveLayer();
     this.live.onOpen = (kind) => this.openLive(kind);
     this.islandEl.insertBefore(this.live.ringEl, this.botCanvas);
     this.islandEl.append(this.live.strip, this.live.bar);
     this.root.append(this.live.defs, this.wakeStrip, this.live.goo, this.islandEl, this.live.bubble);
+    Hud.subscribe(() => this.onHud());
     this.applyGeometry();
+  }
+
+  hud(spec: HudSpec): boolean {
+    if (State.gameMode || State.paused || State.mode === "expanded") return false;
+    if (this.fsm.state === "hidden") {
+      this.hudRevealed = true;
+      this.quietReveal = true;
+      this.fsm.reveal();
+      this.quietReveal = false;
+    }
+    Hud.show(spec);
+    return true;
+  }
+
+  audioLevel(peak: number) {
+    if (this.metering) feedViz(peak);
+  }
+
+  private onHud() {
+    const spec = Hud.current;
+    if (!spec && this.hudRevealed) {
+      this.hudRevealed = false;
+      window.setTimeout(() => {
+        if (Hud.current || State.mode !== "compact" || this.wasInIsland || this.fsm.keepCompact) return;
+        if (this.fsm.state === "petit") this.fsm.forceHidden();
+      }, 260);
+    }
+    this.dirty = true;
+    this.animateGeometry(!spec);
   }
 
   private openLive(kind: LiveKind) {
@@ -216,6 +278,8 @@ export class Island {
       this.setView("timer");
     } else if (kind === "music") {
       this.setView("music");
+    } else if (kind === "call" || kind === "download") {
+      this.setView(State.defaultView());
     } else {
       const task = busySession();
       if (task) State.setFocus(task.id);
@@ -246,7 +310,7 @@ export class Island {
   private noteMissed(view: IslandViewName) {
     const task = State.focusTask;
     const at = new Date();
-    const clock = `${at.getHours()} h ${String(at.getMinutes()).padStart(2, "0")}`;
+    const clock = `${at.getHours()}\u00A0h\u00A0${String(at.getMinutes()).padStart(2, "0")}`;
     let label: string | null = null;
     switch (view) {
       case "finished": label = task?.sessionId ? `${task.name} a fini` : null; break;
@@ -261,6 +325,7 @@ export class Island {
   }
 
   private wireFsm() {
+    this.fsm.hold = () => !!Hud.current;
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.onTransition = (from, to) => {
       switch (to) {
@@ -269,7 +334,7 @@ export class Island {
           break;
         case "petit":
           if (from === "tako") this.greeting.interrupt();
-          else if (from === "hidden") Sound.play("peek");
+          else if (from === "hidden" && !this.quietReveal) Sound.play("peek");
           this.setMode("compact");
           if (from === "tako") State.view = State.defaultView();
           if (!this.wasInIsland) this.fsm.mouseLeft();
@@ -295,7 +360,10 @@ export class Island {
     const prev = State.mode;
     if (mode === prev) return;
     State.mode = mode;
-    if (mode === "expanded") Sound.play("open");
+    if (mode === "expanded") {
+      Sound.play("open");
+      Hud.clear();
+    }
     if (prev === "expanded") {
       Sound.play("close");
       State.isPinned = false;
@@ -441,7 +509,7 @@ export class Island {
       window.setTimeout(() => this.setView(State.defaultView()), 2400);
     };
     if (file.size > MAX_DROP_BYTES) {
-      fail(`${name} is too big to drop (max ${MAX_DROP_BYTES / 1024 / 1024} MB).`);
+      fail(`${name} est trop lourd pour être déposé (${MAX_DROP_BYTES / 1024 / 1024}\u00A0Mo maximum).`);
       return;
     }
     void file
@@ -479,6 +547,15 @@ export class Island {
   }
 
   private targetSize(): { w: number; h: number; r: number } {
+    if (State.mode === "compact") {
+      const spec = Hud.current;
+      if (spec) {
+        const s = hudSize(spec);
+        return { w: s.w, h: s.h, r: spec.banner ? 26 : 19 };
+      }
+      const wide = this.livePrimary === "call" || this.livePrimary === "download";
+      return { w: wide ? COMPACT_W + 40 : COMPACT_W, h: NOTCH_H, r: ROUNDED_CORNER };
+    }
     const { w, h } = islandSize(State.mode, State.view, State.chatHistory.length, State.sizeHint);
     const r = State.mode === "expanded" ? EXPANDED_CORNER : ROUNDED_CORNER;
     return { w, h, r };
@@ -735,7 +812,7 @@ export class Island {
     if (greetingActive) {
       const gctx = this.greetingCanvas.getContext("2d");
       if (gctx) {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const dpr = this.sizeGreeting();
         gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.greeting.draw(gctx);
       }
@@ -755,9 +832,11 @@ export class Island {
 
     const settling =
       this.width.animating || this.height.animating || this.radius.animating;
+    if (this.wasSettling && !settling) this.dirty = true;
+    this.wasSettling = settling;
     const busy = State.mode === "hidden"
-      ? settling
-      : settling ||
+      ? settling || this.dirty
+      : settling || this.dirty ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
         greetingActive || this.engine.busy || UploadSeq.isActive || this.live.animating ||
         this.views.get(State.view)?.animating?.() === true;
@@ -778,7 +857,8 @@ export class Island {
 
     const greetingActive = State.mode === "expanded" && State.view === "greeting";
 
-    const visible = p.opacity > 0 && !greetingActive && !this.uploadActive;
+    const hudOn = State.mode === "compact" && !!Hud.current;
+    const visible = p.opacity > 0 && p.diameter > 0 && !greetingActive && !this.uploadActive && !hudOn;
     this.botCanvas.style.opacity = visible ? "1" : "0";
 
     if (State.mode === "expanded" && State.view !== "uploading" && !greetingActive && !this.uploadActive) {
@@ -801,8 +881,9 @@ export class Island {
     const w = Math.max(1, Math.round(size));
     const hCss = w + BOT_OVERHANG;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    if (this.canvasPx !== w) {
+    if (this.canvasPx !== w || this.canvasDpr !== dpr) {
       this.canvasPx = w;
+      this.canvasDpr = dpr;
       this.botCanvas.width = Math.round(w * dpr);
       this.botCanvas.height = Math.round(hCss * dpr);
       this.botCanvas.style.width = `${w}px`;
@@ -832,6 +913,18 @@ export class Island {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hCss);
     this.engine.draw(ctx, w, hCss);
+  }
+
+  private sizeGreeting(): number {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (this.greetingDpr !== dpr) {
+      this.greetingDpr = dpr;
+      this.greetingCanvas.width = Math.round(EXPANDED_W * dpr);
+      this.greetingCanvas.height = Math.round(150 * dpr);
+      this.greetingCanvas.style.width = `${EXPANDED_W}px`;
+      this.greetingCanvas.style.height = "150px";
+    }
+    return dpr;
   }
 
   private lookX(): number {
@@ -864,7 +957,7 @@ export class Island {
     if (key === this.lastTargetKey) return;
     const prev = this.lastTargetKey.split(":")[2]?.split("x").map(Number) ?? [w, h];
     this.lastTargetKey = key;
-    if (State.mode === "expanded" && (prev[0] !== w || prev[1] !== h)) {
+    if (State.mode !== "hidden" && (prev[0] !== w || prev[1] !== h)) {
       this.animateGeometry(h < prev[1] || w < prev[0]);
     }
   }
@@ -897,10 +990,18 @@ export class Island {
       }
     }
 
+    const hudOn = State.mode === "compact" && !!Hud.current;
+    this.hudLayer.sync(State.mode === "compact");
+    this.islandEl.classList.toggle("has-hud", hudOn);
+    if (hudOn && Hud.current) this.islandEl.style.setProperty("--key", Hud.current.tone);
+    this.live.setHidden(hudOn);
     const live = this.live.sync(State.mode, State.view);
-    this.fsm.setKeepCompact(Timer.active);
+    this.livePrimary = live.primary;
+    const keepLive = State.settings.keepLiveVisible && (
+      !!busySession() || (State.settings.callActivity && !!State.call) || (State.settings.downloadsEnabled && !!State.download) || musicLive());
+    this.fsm.setKeepCompact(Timer.active || keepLive);
     const m = State.media;
-    const showStrip = State.mode === "compact" && live.primary === "music" && !!m?.active;
+    const showStrip = State.mode === "compact" && !hudOn && live.primary === "music" && !!m?.active;
     this.mediaStrip.classList.toggle("on", showStrip);
     if (showStrip && m) {
       const key = `${m.title}~${m.art ? m.art.length : 0}`;
@@ -909,14 +1010,24 @@ export class Island {
         this.mediaStrip.replaceChildren();
         const art = h("div", { class: "ms-art" });
         if (m.art && m.art.startsWith("data:image/")) art.append(h("img", { src: m.art, alt: "" }));
-        this.mediaStrip.append(art, h("span", { class: "ms-title", text: m.title }), h("div", { class: "eq on" }, h("i"), h("i"), h("i")));
+        this.mediaStrip.append(art, h("span", { class: "ms-title", text: m.title }), vizEl(4, "ms-viz"));
       }
     }
+    const wantMeter = State.settings.visualizer && musicLive() && !hudOn && (
+      (State.mode === "compact" && (live.primary === "music" || live.secondary === "music")) ||
+      (State.mode === "expanded" && State.view === "music"));
+    if (wantMeter !== this.metering) {
+      this.metering = wantMeter;
+      void Bridge.audioMeter(wantMeter);
+      if (!wantMeter) idleViz(true);
+    }
+    this.syncDots(hudOn);
 
-    const showGrid = State.mode === "compact";
+    const showGrid = State.mode === "compact" && !hudOn;
     this.miniGrid.style.opacity = showGrid ? "1" : "0";
+    const others = showGrid ? State.otherTasks.slice(0, 4) : [];
+    this.syncTrail(showGrid && others.length === 0 && live.primary !== "call" && live.primary !== "download");
     if (showGrid) {
-      const others = State.otherTasks.slice(0, 4);
       const key = others.map((t) => t.id).join("|");
       if (this.miniGrid.dataset.key !== key) {
         this.miniGrid.dataset.key = key;
@@ -931,6 +1042,54 @@ export class Island {
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
     this.followContentSize();
+  }
+
+  private syncTrail(on: boolean) {
+    const w = State.weather;
+    let kind = "";
+    if (on) {
+      if (State.settings.notificationsEnabled && State.unreadNotices > 0) kind = "bell";
+      else if (State.settings.weatherEnabled && w) kind = "wx";
+      else kind = "clock";
+    }
+    this.trail.classList.toggle("on", !!kind);
+    const now = new Date();
+    const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const key = kind === "bell" ? `bell${State.unreadNotices}` : kind === "wx" && w ? `wx${Math.round(w.temp)}${w.code}${w.isDay}` : kind === "clock" ? `clock${clock}` : "";
+    if (key === this.trailKey) return;
+    this.trailKey = key;
+    this.trail.dataset.kind = kind;
+    this.trail.replaceChildren();
+    this.trail.title = "";
+    if (kind === "bell") {
+      const n = State.unreadNotices;
+      this.trail.append(proIcon("bell", 12, 2.2), h("b", { text: n > 9 ? "9+" : String(n) }));
+      this.trail.title = `${n} notification${n > 1 ? "s" : ""} non lue${n > 1 ? "s" : ""}`;
+    } else if (kind === "wx" && w) {
+      this.trail.style.setProperty("--wx", weatherTone(w));
+      this.trail.append(proIcon(weatherIcon(w), 14, 2), h("span", { text: `${Math.round(w.temp)}°` }));
+      this.trail.title = w.city;
+    } else if (kind === "clock") {
+      this.trail.append(h("span", { text: clock }));
+    }
+  }
+
+  private syncDots(hudOn: boolean) {
+    const p = State.privacy;
+    const on = State.settings.privacyDots && State.mode === "compact" && !hudOn && (p.mic.length > 0 || p.cam.length > 0);
+    this.dots.classList.toggle("on", on);
+    this.islandEl.classList.toggle("dots-on", on);
+    const key = on ? `${p.mic.map((u) => u.app).join(",")}|${p.cam.map((u) => u.app).join(",")}` : "";
+    if (key === this.dotsKey) return;
+    this.dotsKey = key;
+    this.dots.replaceChildren();
+    if (!on) return;
+    if (p.cam.length) this.dots.append(h("i", { class: "cam" }));
+    if (p.mic.length) this.dots.append(h("i", { class: "mic" }));
+    const parts = [];
+    if (p.mic.length) parts.push(`Micro : ${p.mic.map((u) => u.app).join(", ")}`);
+    if (p.cam.length) parts.push(`Caméra : ${p.cam.map((u) => u.app).join(", ")}`);
+    this.dots.title = parts.join(" · ");
   }
 
   applySettings() {

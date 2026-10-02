@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -21,6 +21,31 @@ pub const STRIP_H: f64 = 6.0;
 pub const WINDOW_LABEL: &str = "island";
 
 const HIT_MARGIN: f64 = 14.0;
+
+const MIN_ZOOM: f64 = 0.85;
+const MAX_ZOOM: f64 = 1.6;
+
+static ZOOM: AtomicU64 = AtomicU64::new(0x3FF0_0000_0000_0000);
+
+pub fn clamp_zoom(z: f64) -> f64 {
+    if z.is_finite() { z.clamp(MIN_ZOOM, MAX_ZOOM) } else { 1.0 }
+}
+
+pub fn zoom() -> f64 {
+    f64::from_bits(ZOOM.load(Ordering::Relaxed))
+}
+
+pub fn set_zoom(app: &AppHandle, z: f64) {
+    let z = clamp_zoom(z);
+    ZOOM.store(z.to_bits(), Ordering::Relaxed);
+    if let Some(win) = window(app) {
+        let _ = win.set_zoom(z);
+    }
+    if let Some(win) = app.get_webview_window(crate::widget::LABEL) {
+        let _ = win.set_zoom(z);
+    }
+    crate::widget::replace(app);
+}
 
 #[derive(Serialize, Clone)]
 pub struct CursorPayload {
@@ -157,7 +182,8 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
     let mp = *m.position();
     let ms = *m.size();
 
-    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
+    let z = zoom();
+    let (lw, lh) = if collapsed { (STRIP_W * z, STRIP_H * z) } else { (PANEL_W * z, PANEL_H * z) };
     let pw = (lw * scale).round().max(1.0) as u32;
     let ph = (lh * scale).round().max(1.0) as u32;
     let x = mp.x + (ms.width as i32 - pw as i32) / 2;
@@ -239,7 +265,7 @@ pub fn spawn_cursor_poll(app: AppHandle, gate: Arc<PollGate>) {
 
                 let Some(win) = window(&app) else { continue };
                 let Ok(origin) = win.outer_position() else { continue };
-                let scale = win.scale_factor().unwrap_or(1.0);
+                let scale = win.scale_factor().unwrap_or(1.0) * zoom();
                 let Some((cx, cy)) = cursor_physical() else { continue };
                 let x = (cx - origin.x as f64) / scale;
                 let y = (cy - origin.y as f64) / scale;
@@ -304,7 +330,7 @@ pub fn spawn_drag_watch(app: AppHandle, gate: Arc<PollGate>) {
             }
             let Some(win) = window(&app) else { continue };
             let (Ok(origin), Ok(size)) = (win.outer_position(), win.outer_size()) else { continue };
-            let scale = win.scale_factor().unwrap_or(1.0);
+            let scale = win.scale_factor().unwrap_or(1.0) * zoom();
             let Some((cx, cy)) = cursor_physical() else { continue };
             let centre = origin.x as f64 + size.width as f64 / 2.0;
             let near_x = (cx - centre).abs() <= DRAG_WAKE_HALF_WIDTH * scale;

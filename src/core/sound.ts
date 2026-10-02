@@ -69,8 +69,13 @@ class SoundEngine {
     this.enabled = on;
   }
 
+  private lastPlayed = new Map<string, number>();
+
   play(name: SoundName | string, force = false) {
     if (!this.enabled || (this.muted && !force)) return;
+    const now = performance.now();
+    if (now - (this.lastPlayed.get(name) ?? -1e9) < 260) return;
+    this.lastPlayed.set(name, now);
     const ctx = this.ctx;
     const master = this.master;
     const buf = this.buffers.get(name);

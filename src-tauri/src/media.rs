@@ -139,9 +139,11 @@ pub fn start(app: AppHandle, gate: Arc<crate::island::PollGate>) {
         let mut art_key = String::new();
         let mut art = None;
         let mut current = None;
+        let mut tick: u32 = 0;
         loop {
             std::thread::sleep(EVERY);
-            if gate.collapsed.load(Ordering::Relaxed) {
+            tick = tick.wrapping_add(1);
+            if gate.collapsed.load(Ordering::Relaxed) && tick % 2 == 0 {
                 continue;
             }
             if !ENABLED.load(Ordering::Relaxed) {

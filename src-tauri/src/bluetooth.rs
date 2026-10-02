@@ -166,7 +166,7 @@ fn track(app: &AppHandle, known: &mut HashMap<String, (BluetoothDevice, i64)>, i
     }
     let Ok(device) = BluetoothDevice::FromIdAsync(id).and_then(|op| op.get()) else { return };
     let initial = describe(&device);
-    SEEN.lock().unwrap().get_or_insert_with(HashMap::new).insert(initial.address.clone(), (initial.connected, Instant::now() - REPEAT_WINDOW));
+    SEEN.lock().unwrap().get_or_insert_with(HashMap::new).insert(initial.address.clone(), (initial.connected, Instant::now().checked_sub(REPEAT_WINDOW).unwrap_or_else(Instant::now)));
     let handler_app = app.clone();
     let token = device.ConnectionStatusChanged(&TypedEventHandler::new(
         move |sender: Ref<'_, BluetoothDevice>, _args: Ref<'_, windows::core::IInspectable>| {

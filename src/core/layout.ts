@@ -26,7 +26,9 @@ export type IslandViewName =
   | "usage"
   | "timer"
   | "bluetooth"
-  | "vpn";
+  | "vpn"
+  | "notifications"
+  | "today";
 
 export type BotStateName =
   | "idle"
@@ -58,7 +60,11 @@ export const PANEL_H = 440;
 
 export const GROW = 1.3;
 
-export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished", "mission", "vpn"]);
+export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished", "mission", "vpn", "approval", "question", "error", "note"]);
+
+const FREE_HEIGHT: Partial<Record<IslandViewName, [number, number]>> = {
+  notifications: [150, 330],
+};
 
 export interface SizeHint {
   view: IslandViewName;
@@ -106,6 +112,8 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   timer: { height: 176, botX: 80, botY: 108, botDiameter: 50, agentMode: "none" },
   bluetooth: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
   vpn: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
+  notifications: { height: 268, botX: 0, botY: null, botDiameter: 0, agentMode: "none" },
+  today: { height: 226, botX: 0, botY: null, botDiameter: 0, agentMode: "none" },
 };
 
 export function chatPromptHeight(messageCount: number): number {
@@ -125,6 +133,12 @@ export function islandSize(
     case "compact":
       return { w: COMPACT_W, h: NOTCH_H };
     case "expanded": {
+      const free = FREE_HEIGHT[view];
+      if (free) {
+        const [lo, hi] = free;
+        const wanted = hint && hint.view === view ? hint.h : VIEW_LAYOUTS[view].height;
+        return { w: EXPANDED_W, h: Math.round(Math.min(hi, Math.max(lo, wanted))) };
+      }
       const h = view === "prompt" ? chatPromptHeight(chatCount) : VIEW_LAYOUTS[view].height;
       if (!hint || hint.view !== view || !GROWING_VIEWS.has(view)) return { w: EXPANDED_W, h };
       const clamp = (v: number, base: number) => Math.round(Math.min(base * GROW, Math.max(base, v)));

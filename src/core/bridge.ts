@@ -107,7 +107,93 @@ export const Bridge = {
   openN8n: () => call<void>("open_n8n"),
 
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+
+  audioMeter: (on: boolean) => call<void>("audio_meter", { on }),
+  powerStatus: () => call<PowerInfo>("power_status"),
+  privacyStatus: () => call<PrivacyInfo>("privacy_status"),
+  weatherNow: () => call<WeatherInfo | null>("weather_now"),
+  weatherRefresh: () => call<void>("weather_refresh"),
+  weatherFailure: () => call<string | null>("weather_failure"),
+  driveOpen: (letter: string) => call<boolean>("drive_open", { letter }),
+  downloadOpen: (path: string) => call<boolean>("download_open", { path }),
+  downloadReveal: (path: string) => call<boolean>("download_reveal", { path }),
+  notificationOpen: (appId: string) => call<boolean>("notification_open", { appId }),
+  hudTest: (kind: string) => call<void>("hud_test", { kind }),
 };
+
+export interface VolumeInfo {
+  level: number;
+  muted: boolean;
+}
+
+export interface PowerInfo {
+  hasBattery: boolean;
+  percent: number;
+  plugged: boolean;
+  saver: boolean;
+}
+
+export interface DeviceUse {
+  app: string;
+  since: number;
+}
+
+export interface PrivacyInfo {
+  mic: DeviceUse[];
+  cam: DeviceUse[];
+}
+
+export interface DriveInfo {
+  letter: string;
+  label: string;
+  total: number;
+  free: number;
+  kind: "usb" | "disc";
+  present: boolean;
+}
+
+export interface NetworkInfo {
+  online: boolean;
+  name: string;
+}
+
+export interface DownloadInfo {
+  name: string;
+  path: string;
+  bytes: number;
+  speed: number;
+  state: "active" | "done" | "cancelled";
+  runnable: boolean;
+}
+
+export interface NoticeInfo {
+  id: number;
+  app: string;
+  appId: string;
+  title: string;
+  body: string;
+  logo: string | null;
+  at: number;
+}
+
+export interface WeatherDay {
+  date: string;
+  code: number;
+  max: number;
+  min: number;
+}
+
+export interface WeatherInfo {
+  city: string;
+  temp: number;
+  code: number;
+  isDay: boolean;
+  max: number;
+  min: number;
+  wind: number;
+  humidity: number;
+  days: WeatherDay[];
+}
 
 export interface IntegrationUpdate {
   id: string;

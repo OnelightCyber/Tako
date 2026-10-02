@@ -22,7 +22,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "process"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "process", "macros"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 keyring = { version = "3", features = ["windows-native"] }
 similar = "2"
@@ -31,23 +31,37 @@ windows = { version = "0.61", features = [
   "Win32_Devices_Properties",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_NetworkListManager",
   "Win32_Networking_WinSock",
   "Win32_Security",
   "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
   "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
   "Win32_System_Ole",
   "Win32_System_Performance",
+  "Win32_System_Power",
+  "Win32_System_Registry",
+  "Win32_System_Variant",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
+  "ApplicationModel",
   "Devices_Bluetooth",
   "Devices_Enumeration",
   "Foundation",
   "Foundation_Collections",
   "Media_Control",
   "Storage_Streams",
+  "UI_Notifications",
+  "UI_Notifications_Management",
 ] }

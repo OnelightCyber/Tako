@@ -142,7 +142,7 @@ function renderSteps(
     host.append(row);
   }
   if (finished) {
-    host.append(h("div", { class: "s-step done final" }, statusIcon("done"), h("span", { class: "s-label", text: "Done" })));
+    host.append(h("div", { class: "s-step done final" }, statusIcon("done"), h("span", { class: "s-label", text: "Terminé" })));
   }
 }
 
@@ -298,7 +298,7 @@ function renderTerminal(body: HTMLElement, a: Activity) {
     body.append(h("div", { class: `t-line ${tone(line)}`, text: line || " " }));
   }
   if (a.status === "running") body.append(h("div", { class: "t-line" }, h("i", { class: "t-cursor" })));
-  else if (a.status === "failed" && !lines.length) body.append(h("div", { class: "t-line err", text: "✕ failed" }));
+  else if (a.status === "failed" && !lines.length) body.append(h("div", { class: "t-line err", text: "Échec" }));
   body.scrollTop = body.scrollHeight;
 }
 
@@ -337,7 +337,7 @@ function renderTodos(body: HTMLElement, a: Activity) {
 
 function renderPrompt(body: HTMLElement, task: AgentTask) {
   if (task.prompt) body.append(h("div", { class: "prompt-bubble", text: task.prompt }));
-  const label = task.state === "thinking" ? "Claude is thinking…" : task.state === "working" ? "Working…" : "Waiting for the next prompt.";
+  const label = task.state === "thinking" ? "Claude réfléchit…" : task.state === "working" ? "Au travail…" : "En attente de ta prochaine demande.";
   body.append(h("div", { class: `prompt-status ${task.state === "thinking" || task.state === "working" ? "shimmer" : "dim"}`, text: label }));
 }
 

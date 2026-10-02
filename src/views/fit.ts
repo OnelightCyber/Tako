@@ -29,4 +29,5 @@ export function setSizeHint(view: IslandViewName, w: number, h: number) {
   const cur = State.sizeHint;
   if (cur && cur.view === view && Math.abs(cur.w - w) < 3 && Math.abs(cur.h - h) < 3) return;
   State.sizeHint = { view, w: Math.round(w), h: Math.round(h) };
+  queueMicrotask(() => State.notify());
 }

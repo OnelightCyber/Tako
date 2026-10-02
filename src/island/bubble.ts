@@ -1,17 +1,22 @@
 import { Spring, clamp, lerp } from "../core/anim";
+import { bytes, clockSince, middle } from "../core/hud";
 import { State, type AgentTask } from "../core/state";
 import { Timer, PHASE_COLORS, clockText, phaseLabel } from "../core/timer";
 import { createMiniBot } from "../mascot/minibots";
 import { h, clear } from "../views/dom";
 import { liveRing, type LiveRing } from "../views/extra";
+import { proIcon } from "../views/pro-icons";
+import { vizEl } from "../views/viz";
 import type { IslandMode, IslandViewName } from "../core/layout";
 
-export type LiveKind = "session" | "timer" | "music";
+export type LiveKind = "session" | "call" | "timer" | "download" | "music";
 
 const D = 30;
 const GAP = 12;
 const NS = "http://www.w3.org/2000/svg";
 const BUSY = new Set(["working", "thinking", "approval", "question"]);
+const CALL_COLOR = "#34D399";
+const DOWNLOAD_COLOR = "#38BDF8";
 
 export function busySession(): AgentTask | null {
   const busy = State.sessions.filter((t) => BUSY.has(t.state));
@@ -19,11 +24,19 @@ export function busySession(): AgentTask | null {
   return busy[0] ?? null;
 }
 
+export function musicLive(): boolean {
+  return State.settings.mediaEnabled && !!State.media?.active && State.media.playing;
+}
+
 export function liveKinds(): LiveKind[] {
   const out: LiveKind[] = [];
-  if (busySession()) out.push("session");
+  const session = busySession();
+  if (session?.state === "approval") out.push("session");
+  if (State.call && State.settings.callActivity) out.push("call");
+  if (session && !out.includes("session")) out.push("session");
   if (Timer.active) out.push("timer");
-  if (State.settings.mediaEnabled && State.media?.active && State.media.playing) out.push("music");
+  if (State.download && State.settings.downloadsEnabled) out.push("download");
+  if (musicLive()) out.push("music");
   return out;
 }
 
@@ -89,6 +102,7 @@ export class LiveLayer {
   private gooPill: HTMLElement;
   private gooBall: HTMLElement;
   private inner: HTMLElement;
+  private stripIcon: HTMLElement;
   private stripLabel: HTMLElement;
   private stripTime: HTMLElement;
   private barFill: HTMLElement;
@@ -98,9 +112,12 @@ export class LiveLayer {
   private offset = new Spring(0, 0.42, 0.6);
   private kind: LiveKind | null = null;
   private shown: LiveKind | null = null;
+  private stripKind: LiveKind | null = null;
   private contentKey = "";
   private pill = { x: 0, w: 0, h: 0, r: 0 };
   private mode: IslandMode = "hidden";
+  private clock: number | null = null;
+  private hidden = false;
 
   constructor() {
     this.gooPill = h("div", { class: "goo-pill" });
@@ -113,9 +130,10 @@ export class LiveLayer {
       e.stopPropagation();
       if (this.shown) this.onOpen?.(this.shown);
     });
+    this.stripIcon = h("span", { class: "ls-icon" });
     this.stripLabel = h("span", { class: "ls-label" });
     this.stripTime = h("span", { class: "ls-time" });
-    this.strip = h("div", { id: "live-strip" }, this.stripLabel, this.stripTime);
+    this.strip = h("div", { id: "live-strip" }, this.stripIcon, this.stripLabel, this.stripTime);
     this.barFill = h("i");
     this.bar = h("div", { id: "live-bar" }, this.barFill);
     this.ringEl = this.ring.el;
@@ -126,8 +144,16 @@ export class LiveLayer {
     return !this.offset.settled;
   }
 
+  get bubbleKind(): LiveKind | null {
+    return this.shown;
+  }
+
+  setHidden(on: boolean) {
+    this.hidden = on;
+  }
+
   bubbleRect(): { x: number; y: number; w: number; h: number } | null {
-    if (this.mode !== "compact" || !this.shown || this.offset.value < 0.5) return null;
+    if (this.mode !== "compact" || this.hidden || !this.shown || this.offset.value < 0.5) return null;
     const cx = this.centerX();
     return { x: cx - D / 2, y: 0, w: D, h: Math.max(this.pill.h, D + 2) };
   }
@@ -142,7 +168,7 @@ export class LiveLayer {
     const kinds = liveKinds();
     const primary = kinds[0] ?? null;
     const secondary = kinds[1] ?? null;
-    const wanted = mode === "compact" ? secondary : null;
+    const wanted = mode === "compact" && !this.hidden ? secondary : null;
     if (wanted !== this.kind) {
       this.kind = wanted;
       if (wanted) {
@@ -158,13 +184,14 @@ export class LiveLayer {
     this.renderBubble();
     this.renderStrip(mode, primary);
     this.renderRing(mode, view, primary);
+    this.syncClock(kinds);
     return { primary, secondary };
   }
 
   layout(x: number, w: number, hh: number, r: number, mode: IslandMode) {
     this.pill = { x, w, h: hh, r };
     this.mode = mode;
-    const visible = mode === "compact" && (this.offset.value > 0.02 || this.offset.target > 0);
+    const visible = mode === "compact" && !this.hidden && (this.offset.value > 0.02 || this.offset.target > 0);
     this.goo.style.display = visible ? "block" : "none";
     this.bubble.style.display = visible ? "grid" : "none";
     if (!visible) return;
@@ -204,16 +231,63 @@ export class LiveLayer {
     if (this.shown === "timer") this.renderTimerBubble();
   }
 
+  private syncClock(kinds: LiveKind[]) {
+    const need = kinds.includes("call") || kinds.includes("download");
+    if (need && this.clock == null) {
+      this.clock = window.setInterval(() => {
+        this.renderStripTime();
+        if (this.shown === "call") this.renderCallBubble();
+      }, 1000);
+    } else if (!need && this.clock != null) {
+      window.clearInterval(this.clock);
+      this.clock = null;
+    }
+  }
+
   private renderStrip(mode: IslandMode, primary: LiveKind | null) {
-    const on = mode === "compact" && primary === "timer" && !!Timer.state;
+    const kind = mode === "compact" && !this.hidden && (primary === "timer" || primary === "call" || primary === "download") ? primary : null;
+    const on = kind === "timer" ? !!Timer.state : kind === "call" ? !!State.call : kind === "download" ? !!State.download : false;
     this.strip.classList.toggle("on", on);
-    this.bar.classList.toggle("on", on);
-    if (on) this.renderStripTime();
+    this.bar.classList.toggle("on", on && kind !== "call");
+    this.bar.classList.toggle("flow", on && kind === "download");
+    if (!on) {
+      this.stripKind = null;
+      return;
+    }
+    if (kind !== this.stripKind) {
+      this.stripKind = kind;
+      this.strip.dataset.kind = kind ?? "";
+      clear(this.stripIcon);
+      if (kind === "call") this.stripIcon.append(proIcon("phoneCall", 12, 2.2));
+      if (kind === "download") this.stripIcon.append(proIcon("download", 12, 2.4));
+      this.stripIcon.style.display = kind === "timer" ? "none" : "";
+    }
+    this.renderStripTime();
   }
 
   private renderStripTime() {
+    if (this.stripKind === "call") {
+      const c = State.call;
+      if (!c) return;
+      this.strip.style.setProperty("--tm", CALL_COLOR);
+      this.stripLabel.textContent = c.app;
+      this.stripTime.textContent = clockSince(c.since);
+      this.strip.classList.remove("paused", "done");
+      return;
+    }
+    if (this.stripKind === "download") {
+      const d = State.download;
+      if (!d) return;
+      this.strip.style.setProperty("--tm", DOWNLOAD_COLOR);
+      const more = State.downloadCount > 1 ? ` +${State.downloadCount - 1}` : "";
+      this.stripLabel.textContent = `${d.name ? middle(d.name, 22) : "Téléchargement"}${more}`;
+      this.stripTime.textContent = d.speed > 0 ? `${bytes(d.bytes)} · ${bytes(d.speed)}/s` : bytes(d.bytes);
+      this.strip.classList.remove("paused", "done");
+      this.barFill.style.background = DOWNLOAD_COLOR;
+      return;
+    }
     const s = Timer.state;
-    if (!s) return;
+    if (!s || this.stripKind !== "timer") return;
     const color = PHASE_COLORS[s.phase];
     this.stripLabel.textContent = s.done ? "Terminé" : phaseLabel(s);
     this.stripTime.textContent = s.done ? "00:00" : clockText(Timer.remaining());
@@ -226,7 +300,7 @@ export class LiveLayer {
 
   private renderRing(mode: IslandMode, view: IslandViewName, primary: LiveKind | null) {
     const s = Timer.state;
-    const on = !!s && ((mode === "compact" && primary === "timer") || (mode === "expanded" && view === "timer"));
+    const on = !this.hidden && !!s && ((mode === "compact" && primary === "timer") || (mode === "expanded" && view === "timer"));
     this.ringEl.classList.toggle("on", on);
     this.ringEl.classList.toggle("done", !!s?.done);
     if (on) this.renderRingProgress();
@@ -248,11 +322,16 @@ export class LiveLayer {
     this.bubbleText.textContent = s.done ? "!" : !s.running ? "II" : mins > 99 ? "99+" : String(mins);
   }
 
+  private renderCallBubble() {
+    const c = State.call;
+    this.bubble.title = c ? `${c.app} · ${clockSince(c.since)}` : "";
+  }
+
   private renderBubble() {
     const kind = this.shown;
     const task = kind === "session" ? busySession() : null;
     const m = State.media;
-    const key = `${kind}~${task?.id ?? ""}~${task?.state ?? ""}~${kind === "music" ? `${m?.title}~${m?.art?.length ?? 0}` : ""}`;
+    const key = `${kind}~${task?.id ?? ""}~${task?.state ?? ""}~${kind === "music" ? `${m?.title}~${m?.art?.length ?? 0}` : ""}~${kind === "call" ? State.call?.app : ""}`;
     if (key === this.contentKey) {
       if (kind === "timer") this.renderTimerBubble();
       return;
@@ -267,12 +346,18 @@ export class LiveLayer {
     } else if (kind === "music" && m) {
       const art = h("div", { class: "lb-art" });
       if (m.art && m.art.startsWith("data:image/")) art.append(h("img", { src: m.art, alt: "" }));
-      this.inner.append(art, h("div", { class: "eq on lb-eq" }, h("i"), h("i"), h("i")));
+      this.inner.append(art, vizEl(3, "lb-viz"));
       this.bubble.title = [m.title, m.artist].filter(Boolean).join(" · ");
     } else if (kind === "session" && task) {
       this.inner.append(createMiniBot(task, 20));
       this.bubble.classList.toggle("asking", task.state === "approval");
       this.bubble.title = task.name;
+    } else if (kind === "call") {
+      this.inner.append(proIcon("phoneCall", 14, 2.2));
+      this.renderCallBubble();
+    } else if (kind === "download") {
+      this.inner.append(h("i", { class: "lb-spin" }), proIcon("download", 13, 2.4));
+      this.bubble.title = State.download?.name || "Téléchargement";
     }
   }
 }

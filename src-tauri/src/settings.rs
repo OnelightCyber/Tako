@@ -66,6 +66,42 @@ pub struct Settings {
     pub pomodoro_long: u32,
     #[serde(default = "default_rounds")]
     pub pomodoro_rounds: u32,
+    #[serde(default = "default_scale")]
+    pub island_scale: f64,
+    #[serde(default = "default_true")]
+    pub keep_live_visible: bool,
+    #[serde(default = "default_true")]
+    pub volume_hud: bool,
+    #[serde(default = "default_true")]
+    pub lock_keys_hud: bool,
+    #[serde(default = "default_true")]
+    pub battery_alerts: bool,
+    #[serde(default = "default_true")]
+    pub privacy_dots: bool,
+    #[serde(default = "default_true")]
+    pub call_activity: bool,
+    #[serde(default = "default_true")]
+    pub downloads_enabled: bool,
+    #[serde(default = "default_true")]
+    pub drives_enabled: bool,
+    #[serde(default = "default_true")]
+    pub network_alerts: bool,
+    #[serde(default = "default_true")]
+    pub notifications_enabled: bool,
+    #[serde(default)]
+    pub notifications_private: bool,
+    #[serde(default)]
+    pub notifications_muted: Vec<String>,
+    #[serde(default = "default_true")]
+    pub weather_enabled: bool,
+    #[serde(default)]
+    pub weather_city: String,
+    #[serde(default = "default_true")]
+    pub visualizer: bool,
+}
+
+fn default_scale() -> f64 {
+    1.2
 }
 
 fn default_focus() -> u32 {
@@ -142,6 +178,22 @@ impl Default for Settings {
             pomodoro_break: default_break(),
             pomodoro_long: default_long(),
             pomodoro_rounds: default_rounds(),
+            island_scale: default_scale(),
+            keep_live_visible: true,
+            volume_hud: true,
+            lock_keys_hud: true,
+            battery_alerts: true,
+            privacy_dots: true,
+            call_activity: true,
+            downloads_enabled: true,
+            drives_enabled: true,
+            network_alerts: true,
+            notifications_enabled: true,
+            notifications_private: false,
+            notifications_muted: Vec::new(),
+            weather_enabled: true,
+            weather_city: String::new(),
+            visualizer: true,
         }
     }
 }

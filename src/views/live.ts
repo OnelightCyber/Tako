@@ -139,7 +139,7 @@ export function timerPill(actions: ViewActions): { el: HTMLElement; update(): vo
       if (!s) return;
       ring.set(Timer.progress() * 100);
       ring.el.querySelector(".ring-bar")?.setAttribute("stroke", PHASE_COLORS[s.phase]);
-      label.textContent = s.done ? "Terminé" : `${clockText(Timer.remaining())}${s.running ? "" : " ⏸"}`;
+      label.textContent = s.done ? "Terminé" : `${clockText(Timer.remaining())}${s.running ? "" : " · pause"}`;
     },
   };
 }

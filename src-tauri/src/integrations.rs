@@ -695,7 +695,7 @@ fn n8n_detail(json: &Value, success: bool) -> Option<String> {
         .first()?
         .as_array()?;
     let count = items.len();
-    let header = format!("→ {last_node} · {count} item{}", if count == 1 { "" } else { "s" });
+    let header = format!("→ {last_node} · {count} élément{}", if count == 1 { "" } else { "s" });
 
     let fields = items
         .first()

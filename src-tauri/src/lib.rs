@@ -1,15 +1,23 @@
-mod claude;
+mod audio;
 mod bluetooth;
 mod browser;
+mod claude;
 mod claude_cli;
+mod downloads;
+mod drives;
 mod files;
 mod game;
 mod hooks;
 mod integrations;
 mod island;
+mod keys;
 mod log;
 mod media;
+mod network;
+mod notify;
 mod pipe;
+mod power;
+mod privacy;
 mod secrets;
 mod sessions;
 mod settings;
@@ -18,6 +26,7 @@ mod tray;
 mod updater;
 mod usage;
 mod vpn;
+mod weather;
 mod widget;
 mod win_user;
 
@@ -69,12 +78,15 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed) = {
+    let mut settings = settings;
+    settings.island_scale = island::clamp_zoom(settings.island_scale);
+    let (screen_changed, autostart_changed, zoom_changed) = {
         let mut current = shared.settings.lock().unwrap();
         let screen_changed = current.screen != settings.screen;
         let autostart_changed = current.autostart != settings.autostart;
+        let zoom_changed = (current.island_scale - settings.island_scale).abs() > f64::EPSILON;
         *current = settings.clone();
-        (screen_changed, autostart_changed)
+        (screen_changed, autostart_changed, zoom_changed)
     };
     if let Err(err) = settings::save(&settings) {
         eprintln!("[tako] could not save settings: {err}");
@@ -86,7 +98,10 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
             eprintln!("[tako] autostart: {err}");
         }
     }
-    if screen_changed {
+    if zoom_changed {
+        island::set_zoom(&app, settings.island_scale);
+    }
+    if screen_changed || zoom_changed {
         let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
         island::apply_geometry(&app, &settings.screen, collapsed);
     }
@@ -104,7 +119,74 @@ fn apply_features(app: &AppHandle, settings: &Settings) {
     game::set_enabled(settings.game_mode);
     bluetooth::set_enabled(settings.bt_animation);
     vpn::set_enabled(settings.vpn_alerts);
+    audio::set_hud(settings.volume_hud);
+    keys::set_enabled(settings.lock_keys_hud);
+    power::set_enabled(settings.battery_alerts);
+    privacy::set_enabled(settings.privacy_dots || settings.call_activity);
+    downloads::set_enabled(settings.downloads_enabled);
+    drives::set_enabled(settings.drives_enabled);
+    network::set_enabled(settings.network_alerts);
+    notify::configure(settings.notifications_enabled, settings.notifications_private, &settings.notifications_muted);
+    weather::configure(settings.weather_enabled, &settings.weather_city);
     register_hotkey(app, &settings.mission_hotkey);
+}
+
+#[tauri::command]
+fn audio_meter(on: bool) {
+    audio::set_meter(on);
+}
+
+#[tauri::command]
+fn power_status() -> power::Power {
+    power::status()
+}
+
+#[tauri::command]
+fn privacy_status() -> privacy::Privacy {
+    privacy::status()
+}
+
+#[tauri::command]
+fn weather_now() -> Option<weather::Weather> {
+    weather::current()
+}
+
+#[tauri::command]
+fn weather_refresh() {
+    weather::refresh();
+}
+
+#[tauri::command]
+fn weather_failure() -> Option<String> {
+    weather::failure()
+}
+
+#[tauri::command]
+fn drive_open(letter: String) -> bool {
+    drives::open(&letter)
+}
+
+#[tauri::command]
+fn download_open(path: String) -> bool {
+    downloads::open(&path)
+}
+
+#[tauri::command]
+fn download_reveal(path: String) -> bool {
+    downloads::reveal(&path)
+}
+
+#[tauri::command]
+fn notification_open(app_id: String) -> bool {
+    notify::open(&app_id)
+}
+
+#[tauri::command]
+fn hud_test(app: AppHandle, kind: String) {
+    const KINDS: &[&str] = &["volume", "caps", "charging", "battery", "drive", "network", "download", "notification", "call"];
+    if KINDS.contains(&kind.as_str()) {
+        let _ = app.emit_to(island::WINDOW_LABEL, "hud-test", kind);
+    }
 }
 
 #[tauri::command]
@@ -321,20 +403,27 @@ async fn chat_send(
     cwd: Option<String>,
 ) -> Result<ChatReply, String> {
     if let Some(exe) = claude_cli::find() {
-        let (screen, agent, visible, auto, apps) = {
+        let (screen, agent, auto, apps) = {
             let s = shared.settings.lock().unwrap();
-            (s.chat_screen, s.chat_agent, s.agent_browser_visible, s.agent_auto, s.chat_apps)
+            (s.chat_screen, s.chat_agent, s.agent_auto, s.chat_apps)
         };
         let browser = if agent {
-            if !browser.is_ready(visible).await {
-                let _ = app.emit_to(island::WINDOW_LABEL, "chat-status", "Starting the browser…");
+            if !browser.server_running() {
+                let _ = app.emit_to(island::WINDOW_LABEL, "chat-status", "Préparation du navigateur…");
             }
-            Some(claude_cli::BrowserLink { url: browser.ensure(visible).await?, auto })
+            match browser.link().await {
+                Ok(url) => Some(url),
+                Err(err) => {
+                    log::line(format!("browser: {err}"));
+                    let _ = app.emit_to(island::WINDOW_LABEL, "chat-status", "Navigateur indisponible, réponse sans lui…");
+                    None
+                }
+            }
         } else {
             browser.stop();
             None
         };
-        let powers = claude_cli::Powers { hook: settings::hook_exe_path(), screen, apps, browser };
+        let powers = claude_cli::Powers { hook: settings::hook_exe_path(), screen, apps, browser, auto };
         return claude_cli::send(&app, &cli_chat, &exe, query, context, cwd, powers).await;
     }
     let model = shared.settings.lock().unwrap().model.clone();
@@ -571,9 +660,9 @@ fn create_settings_window(app: &AppHandle) {
     let url = settings_page_url(app);
     match WebviewWindowBuilder::new(app, "settings", url)
         .additional_browser_args(BROWSER_ARGS)
-        .title("Settings — Tako")
-        .inner_size(940.0, 660.0)
-        .min_inner_size(780.0, 540.0)
+        .title("Réglages — Tako")
+        .inner_size(980.0, 740.0)
+        .min_inner_size(800.0, 560.0)
         .resizable(true)
         .visible(false)
         .center()
@@ -676,6 +765,17 @@ pub fn run() {
             vpn_open_app,
             bluetooth_test,
             media_control,
+            audio_meter,
+            power_status,
+            privacy_status,
+            weather_now,
+            weather_refresh,
+            weather_failure,
+            drive_open,
+            download_open,
+            download_reveal,
+            notification_open,
+            hud_test,
             widget::usage_resize,
             widget::usage_drag,
             widget::usage_close,
@@ -699,6 +799,7 @@ pub fn run() {
             create_settings_window(&handle);
             widget::create(&handle);
 
+            island::set_zoom(&handle, loaded.island_scale);
             if let Some(win) = island::window(&handle) {
                 island::make_non_activating(&win);
                 island::apply_geometry(&handle, &loaded.screen, false);
@@ -741,6 +842,15 @@ pub fn run() {
             game::start(handle.clone());
             vpn::start(handle.clone());
             bluetooth::start(handle.clone());
+            audio::start(handle.clone());
+            keys::start(handle.clone());
+            power::start(handle.clone());
+            privacy::start(handle.clone());
+            downloads::start(handle.clone());
+            drives::start(handle.clone());
+            network::start(handle.clone());
+            notify::start(handle.clone());
+            weather::start(handle.clone());
             apply_features(&handle, &loaded);
             Ok(())
         })

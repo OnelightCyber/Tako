@@ -1,7 +1,10 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName, SizeHint } from "./layout";
 import type { EyeShape } from "../mascot/engine";
 import type { Activity } from "./activity";
-import type { BtEvent, ContextInfo, SystemStats, Track, TurnSummary, UsageAlert, UsageReport, VpnEvent } from "./bridge";
+import type {
+  BtEvent, ContextInfo, DownloadInfo, NetworkInfo, NoticeInfo, PowerInfo, PrivacyInfo, SystemStats, Track, TurnSummary,
+  UsageAlert, UsageReport, VpnEvent, WeatherInfo,
+} from "./bridge";
 import type { DiffLine } from "./activity";
 
 export type AgentSource = "claudeCode" | "n8n";
@@ -150,6 +153,22 @@ export interface Settings {
   pomodoroBreak: number;
   pomodoroLong: number;
   pomodoroRounds: number;
+  islandScale: number;
+  keepLiveVisible: boolean;
+  volumeHud: boolean;
+  lockKeysHud: boolean;
+  batteryAlerts: boolean;
+  privacyDots: boolean;
+  callActivity: boolean;
+  downloadsEnabled: boolean;
+  drivesEnabled: boolean;
+  networkAlerts: boolean;
+  notificationsEnabled: boolean;
+  notificationsPrivate: boolean;
+  notificationsMuted: string[];
+  weatherEnabled: boolean;
+  weatherCity: string;
+  visualizer: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -189,7 +208,28 @@ export const DEFAULT_SETTINGS: Settings = {
   pomodoroBreak: 5,
   pomodoroLong: 15,
   pomodoroRounds: 4,
+  islandScale: 1.2,
+  keepLiveVisible: true,
+  volumeHud: true,
+  lockKeysHud: true,
+  batteryAlerts: true,
+  privacyDots: true,
+  callActivity: true,
+  downloadsEnabled: true,
+  drivesEnabled: true,
+  networkAlerts: true,
+  notificationsEnabled: true,
+  notificationsPrivate: false,
+  notificationsMuted: [],
+  weatherEnabled: true,
+  weatherCity: "",
+  visualizer: true,
 };
+
+export interface CallInfo {
+  app: string;
+  since: number;
+}
 
 type Listener = () => void;
 
@@ -239,6 +279,17 @@ class AppState {
   vpnEvent: VpnEvent | null = null;
   btEvent: BtEvent | null = null;
 
+  notices: NoticeInfo[] = [];
+  unreadNotices = 0;
+  privacy: PrivacyInfo = { mic: [], cam: [] };
+  call: CallInfo | null = null;
+  power: PowerInfo | null = null;
+  network: NetworkInfo | null = null;
+  weather: WeatherInfo | null = null;
+  download: DownloadInfo | null = null;
+  downloadCount = 0;
+  audioPeak = 0;
+
   integrations: Record<string, IntegrationInfo> = {};
 
   lastActivity = performance.now();
@@ -274,7 +325,8 @@ class AppState {
   get otherTasks(): AgentTask[] {
     const focus = this.focusTask?.id;
     const hidePlaceholder = this.sessions.length > 0;
-    const others = this.tasks.filter((t) => t.id !== focus && !(hidePlaceholder && t.id === PLACEHOLDER_ID));
+    const unconfigured = (t: AgentTask) => t.isIntegration && t.id !== PLACEHOLDER_ID && !this.integrations[t.id]?.configured;
+    const others = this.tasks.filter((t) => t.id !== focus && !(hidePlaceholder && t.id === PLACEHOLDER_ID) && !unconfigured(t));
     const sessions = others.filter((t) => t.sessionId).sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0));
     return [...sessions, ...others.filter((t) => !t.sessionId)];
   }

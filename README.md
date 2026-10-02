@@ -120,8 +120,8 @@ file or URL. Nobody answers? Claude Code asks in the terminal, as if Tako weren'
 ### Browser agent
 
 Turn the agent on and the chat drives a **real browser** (Playwright): it opens sites, reads pages, clicks, fills
-forms. Tako starts your own Chrome (or Edge) with a profile of its own and the chat connects to it, so the window
-**stays open** between messages and after every answer — only you close it. By default every action that
+forms. Chrome (or Edge) only starts when the chat really needs a page — a simple question never opens it — with a
+profile of its own, and the window **stays open** between messages and after every answer — only you close it. By default every action that
 does something — open a page, click, type, run JavaScript — is asked in the island with the exact URL or text;
 **auto mode** lets everything through.
 
@@ -138,8 +138,17 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
 
 ### A real Dynamic Island
 
-- **Now playing**: Spotify, YouTube, Deezer… with the artwork, previous / play / next and a progress bar, and a mini
-  equalizer in the compact island.
+- **The island stretches like on an iPhone**: volume, Caps Lock, charging and low battery, a USB drive plugged in
+  (with "Open"), internet lost and back, a finished download (Open / Folder) — the island grows for a second,
+  outlined in the colour of what happened, then folds back.
+- **Your notifications**: Discord, WhatsApp, Outlook, Teams… arrive at the top with the app's icon, and the bell tab
+  keeps them all. A click opens the app; hide an app in one click; a private mode hides the message text.
+- **Calls**: Discord, Teams, Zoom… use your microphone and the island shows the call time. An orange dot when an
+  app uses the microphone, a green one for the camera — hover it to see which.
+- **Today**: the time, the date and the weather in the island, and a click opens the month and a 5-day forecast.
+- **Now playing**: Spotify, YouTube, Deezer… with the artwork, previous / play / next, a progress bar and bars that
+  follow the real sound of your PC.
+- **Bigger for PC screens**: three sizes in the settings, everything scales at once.
 - **Your PC**: processor, memory and graphics card live, in a pill.
 - **The island splits in two**: when two things are live at once — Claude working and a timer, a timer and music —
   a small bubble detaches from the island like a drop, with a gooey animation. Click it to open what it shows.
@@ -157,8 +166,8 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
   near the top of the screen.
 - **Integrations**: GitHub, Vercel, n8n, Resend, Notion, Cal.com, Stripe — up to 4 pills next to the character,
   keys kept in the Windows Credential Manager.
-- **Full settings**: the state of every part, hooks with a diff before anything is written, chat, vision, agent,
-  integrations, sounds, behaviour, updates.
+- **Full settings**: rebuilt from scratch, one page per module with a "Test" button everywhere, and a search
+  that finds any setting.
 - **Out of the way**: compact while Claude works, open on a click, folds itself away, and an option to stay closed
   when Claude finishes — handy while gaming. No taskbar window, no console.
 

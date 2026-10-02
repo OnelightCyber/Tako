@@ -51,8 +51,8 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
   const configured = info?.configured ?? false;
   const error = info?.error ?? null;
 
-  const missing = task.id === "integration_claude" ? "Hooks not installed" : "Key not configured";
-  const label = error ?? (configured ? "Connected · loading…" : missing);
+  const missing = task.id === "integration_claude" ? "Hooks non installés" : "Clé non configurée";
+  const label = error ?? (configured ? "Connecté · chargement…" : missing);
   const statusColor = error || !configured ? "#F4505E" : "#22C55E";
 
   const actions = h("div", { class: "int-actions" });
@@ -61,7 +61,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
       h("button", {
         class: "link-btn",
         style: `color:${task.color}b3`,
-        text: "Open Visual Studio Code",
+        text: "Ouvrir VS Code",
         onclick: () => void Bridge.openInVSCode(task.sessionCwd ?? null),
       }),
     );
@@ -70,7 +70,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
       h("button", {
         class: "link-btn",
         style: `color:${task.color}d9`,
-        text: "Open n8n",
+        text: "Ouvrir n8n",
         onclick: () => void Bridge.openN8n(),
       }),
     );
@@ -79,7 +79,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
       h("button", {
         class: "link-btn",
         style: `color:${task.color}d9`,
-        text: `Open ${task.name}`,
+        text: `Ouvrir ${task.name}`,
         onclick: () => void Bridge.openUrl(OPEN_URLS[task.id]),
       }),
     );
@@ -89,20 +89,20 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
       h("button", {
         class: "link-btn",
         style: `color:${task.color}d9`,
-        text: "Refresh",
+        text: "Actualiser",
         onclick: () => void Bridge.refreshIntegration(task.id),
       }),
     );
   } else {
     actions.append(
-      h("button", { class: "link-btn", style: "color:#8e939c", text: "Settings…", onclick: openSettings }),
+      h("button", { class: "link-btn", style: "color:#8e939c", text: "Réglages…", onclick: openSettings }),
     );
   }
 
   return h(
     "div",
     { class: "int-card" },
-    header(task.color, task.id === "integration_claude" ? "VS Code" : task.name, "Integration"),
+    header(task.color, task.id === "integration_claude" ? "VS Code" : task.name, "Intégration"),
     h("div", { class: "int-status" }, dot(statusColor, 5), h("span", { text: label })),
     actions,
   );
@@ -133,7 +133,7 @@ function vercelDetail(onBack: () => void): HTMLElement {
   const d = arr("integration_vercel", "deployments")[0] ?? {};
   const success = d.state === "READY";
   const accent = success ? "#22C55E" : "#F4505E";
-  const status = success ? "Ready" : d.state === "CANCELED" ? "Canceled" : "Error";
+  const status = success ? "Prêt" : d.state === "CANCELED" ? "Annulé" : "Erreur";
   const body = h("div", { class: "int-detail-body" });
   if (d.commitMessage) body.append(h("div", { class: "int-commit", text: String(d.commitMessage) }));
   const meta = h("div", { class: "int-meta" });
@@ -262,7 +262,7 @@ function notionCard(): HTMLElement {
         p.emoji
           ? h("span", { class: "int-emoji", text: String(p.emoji) })
           : h("i", { class: "int-emoji" }, svg(ICONS.doc, 9)),
-        h("span", { class: "int-name", text: String(p.title ?? "Untitled") }),
+        h("span", { class: "int-name", text: String(p.title ?? "Sans titre") }),
         h("span", { class: "int-ago", text: timeAgo(p.lastEditedAt) }),
       ),
     );
@@ -338,7 +338,7 @@ function n8nDetail(task: AgentTask, onBack: () => void): HTMLElement {
       h("span", {
         class: "int-badge",
         style: `color:${accent};background:${accent}24`,
-        text: success ? "Success" : "Failed",
+        text: success ? "Réussi" : "Échec",
       }),
     ),
     detail

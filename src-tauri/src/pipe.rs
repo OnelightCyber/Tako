@@ -105,6 +105,20 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
         crate::sessions::observe(&app, &event, &payload, path);
     }
 
+    let tool = payload.get("tool_name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let chat_browser = payload.get("tako_origin").and_then(Value::as_str) == Some("chat")
+        && tool.starts_with("mcp__playwright__");
+
+    if payload.get("tako_prepare").and_then(Value::as_bool).unwrap_or(false) {
+        let launch = payload.get("tako_launch").and_then(Value::as_bool).unwrap_or(false) && tool != "mcp__playwright__browser_close";
+        let answer = if chat_browser { prepare_browser(&app, launch).await } else { "allow".to_string() };
+        log::line(format!("hook {event} {tool} prepared: {answer}"));
+        let _ = pipe.write_all(format!("{answer}\n").as_bytes()).await;
+        let _ = pipe.flush().await;
+        let _ = pipe.disconnect();
+        return;
+    }
+
     let awaits = event == "PermissionRequest"
         || payload.get("await_decision").and_then(Value::as_bool).unwrap_or(false);
     if !awaits {
@@ -124,14 +138,33 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
     log::line(format!("hook {event} id={id} awaiting a decision"));
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
 
-    let decision = wait_for_decision(&id, &mut rx).await;
+    let mut decision = wait_for_decision(&id, &mut rx).await;
     app.state::<Pending>().0.lock().unwrap().remove(&id);
+    if chat_browser && decision.as_deref() == Some("allow") {
+        decision = Some(prepare_browser(&app, tool != "mcp__playwright__browser_close").await);
+    }
 
     if let Some(d) = decision {
         let _ = pipe.write_all(format!("{d}\n").as_bytes()).await;
         let _ = pipe.flush().await;
     }
     let _ = pipe.disconnect();
+}
+
+async fn prepare_browser(app: &AppHandle, launch: bool) -> String {
+    let visible = app.state::<crate::Shared>().settings.lock().unwrap().agent_browser_visible;
+    let browser = app.state::<crate::browser::Browser>();
+    if launch && !browser.chrome_running().await {
+        let _ = app.emit_to(WINDOW_LABEL, "chat-status", "Ouverture du navigateur…");
+    }
+    match browser.open(visible, launch).await {
+        Ok(true) => "allow".to_string(),
+        Ok(false) => "closed".to_string(),
+        Err(err) => {
+            log::line(format!("browser: {err}"));
+            "fail".to_string()
+        }
+    }
 }
 
 async fn wait_for_decision(id: &str, rx: &mut mpsc::Receiver<Reply>) -> Option<String> {

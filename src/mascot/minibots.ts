@@ -6,6 +6,7 @@ interface MiniBot {
   engine: BotEngine;
   cssSize: number;
   taskId: string;
+  dpr: number;
 }
 
 const live = new Map<HTMLCanvasElement, MiniBot>();
@@ -36,7 +37,7 @@ export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
     engine.eyeOverrideUntil = Number.POSITIVE_INFINITY;
   }
 
-  live.set(canvas, { canvas, engine, cssSize: engineSize, taskId: task.id });
+  live.set(canvas, { canvas, engine, cssSize: engineSize, taskId: task.id, dpr });
   return slot;
 }
 
@@ -62,6 +63,11 @@ export function syncMiniBotStates(tasks: AgentTask[]) {
 export function tickMiniBots(dt: number) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   for (const mb of live.values()) {
+    if (mb.dpr !== dpr) {
+      mb.dpr = dpr;
+      mb.canvas.width = Math.round(mb.cssSize * dpr);
+      mb.canvas.height = Math.round(mb.cssSize * dpr);
+    }
     const ctx = mb.canvas.getContext("2d");
     if (!ctx) continue;
     mb.engine.update(dt);

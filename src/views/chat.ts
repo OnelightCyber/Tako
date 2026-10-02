@@ -83,7 +83,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 function copyButton(text: string): HTMLElement {
-  const btn = h("button", { class: "copy-btn", title: "Copy" }, proIcon("file", 12, 2));
+  const btn = h("button", { class: "copy-btn", title: "Copier" }, proIcon("file", 12, 2));
   btn.addEventListener("mousedown", (e) => e.stopPropagation());
   btn.addEventListener("click", async (e) => {
     e.stopPropagation();
@@ -191,11 +191,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const input = h("input", {
     type: "text",
     class: "chat-input",
-    placeholder: "Ask me anything…",
+    placeholder: "Demande-moi n'importe quoi…",
     spellcheck: "false",
   }) as HTMLInputElement;
-  const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
-  const clearBtn = h("button", { class: "chat-clear", title: "Clear the conversation" }, svg(ICONS.trash, 12));
+  const send = h("button", { class: "send-btn", title: "Envoyer" }, svg(ICONS.arrowUp, 11));
+  const clearBtn = h("button", { class: "chat-clear", title: "Vider la conversation" }, svg(ICONS.trash, 12));
   const bar = h("div", { class: "chat-bar" }, clearBtn, input, send);
   const menu = h("div", { class: "cmd-menu" });
 

@@ -466,7 +466,7 @@ export function handleHook(island: Island, payload: HookPayload) {
 
     case "PostToolUseFailure":
       task.state = "working";
-      State.appendStep(task.id, "⚠ failed");
+      State.appendStep(task.id, "Échec de l'outil");
       finishActivity(task, payload, true);
       break;
 
@@ -510,11 +510,11 @@ export function handleHook(island: Island, payload: HookPayload) {
       break;
 
     case "SubagentStart":
-      State.appendStep(task.id, "+ subagent");
+      State.appendStep(task.id, "Sous-agent lancé");
       break;
 
     case "SubagentStop":
-      State.appendStep(task.id, "• subagent done");
+      State.appendStep(task.id, "Sous-agent terminé");
       break;
 
     case "PermissionRequest": {

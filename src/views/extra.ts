@@ -1,3 +1,4 @@
+import { vizEl } from "./viz";
 import { h, svg, clear, dot } from "./dom";
 import { proIcon, type ProIconName } from "./pro-icons";
 import { fileBadge } from "./highlight";
@@ -115,7 +116,7 @@ export function contextBadge(task: AgentTask): HTMLElement | null {
   );
 }
 
-function fit(view: IslandViewName, el: HTMLElement, body: HTMLElement, extraW = 0) {
+export function fit(view: IslandViewName, el: HTMLElement, body: HTMLElement, extraW = 0) {
   const box = islandBox(el);
   if (!box) return;
   setSizeHint(view, extraW ? box.w + extraW : 0, box.h - body.clientHeight + contentHeight(body));
@@ -515,7 +516,8 @@ export function buildMusic(): ViewHost {
   const times = h("div", { class: "mu-times" }, elapsed, total);
   const play = control("toggle", 18);
   const controls = h("div", { class: "mu-controls" }, control("previous", 14), play, control("next", 14));
-  const info = h("div", { class: "mu-info" }, title, artist, bar, times, controls);
+  const viz = vizEl(5, "mu-viz");
+  const info = h("div", { class: "mu-info" }, h("div", { class: "mu-head" }, title, viz), artist, bar, times, controls);
   const el = h("div", { class: "view" }, card(null, h("div", { class: "mu-body" }, art, info)));
 
   const progress = () => {
@@ -529,7 +531,7 @@ export function buildMusic(): ViewHost {
     const pos = livePosition();
     fill.style.width = `${Math.min(100, (pos / m.durationMs) * 100)}%`;
     elapsed.textContent = mmss(pos);
-    total.textContent = mmss(m.durationMs);
+    total.textContent = `\u2212${mmss(Math.max(0, m.durationMs - pos))}`;
   };
   window.setInterval(() => {
     if (State.view === "music" && State.mode === "expanded" && State.media?.playing) progress();
@@ -541,6 +543,8 @@ export function buildMusic(): ViewHost {
       const m = State.media;
       setArt(art, m?.active ? m.art : null, 92);
       title.textContent = m?.active ? m.title : "Rien ne joue";
+      viz.style.display = m?.active ? "" : "none";
+      viz.classList.toggle("paused", !m?.playing);
       artist.textContent = m?.active ? [m.artist, m.app].filter(Boolean).join(" · ") : "Lance une musique ou une vidéo.";
       clear(play);
       play.append(svg(m?.playing ? FILLED.pause : FILLED.toggle, 18));
@@ -558,7 +562,7 @@ export interface MediaPill {
 export function mediaPill(actions: ViewActions): MediaPill {
   const art = h("div", { class: "pill-art" });
   const label = h("span", { class: "lbl media" });
-  const eq = h("div", { class: "eq" }, h("i"), h("i"), h("i"));
+  const eq = vizEl(3, "pill-viz");
   const el = h("div", { class: "pill media-pill", title: "Musique", onclick: () => actions.setView("music") }, art, label, eq);
   return {
     el,
@@ -566,7 +570,7 @@ export function mediaPill(actions: ViewActions): MediaPill {
       const m = State.media;
       setArt(art, m?.art ?? null, 22);
       label.textContent = m?.title ?? "";
-      eq.classList.toggle("on", !!m?.playing);
+      eq.classList.toggle("paused", !m?.playing);
     },
   };
 }

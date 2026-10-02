@@ -2,6 +2,7 @@ import "./style.css";
 import "./session.css";
 import "./extra.css";
 import "./live.css";
+import "./hud.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
@@ -10,6 +11,7 @@ import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 import { registerExtras } from "./island/extras";
 import { registerLive } from "./island/live";
+import { registerSystem } from "./island/system";
 
 async function main() {
   const root = document.getElementById("root");
@@ -71,14 +73,30 @@ async function main() {
   registerHookHandlers(island);
   registerExtras(island);
   registerLive(island);
+  registerSystem(island);
   registerIntegrationHandlers(island);
 
   island.launch();
 
+  if (localStorage.getItem("tako.debug") === "1") {
+    const { Hud } = await import("./core/hud");
+    Object.assign(window, { __tako: { State, Hud, island } });
+  }
+
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
-    const feature = new URLSearchParams(location.search).get("feature");
-    if (import.meta.env.DEV && feature) {
+    const params = new URLSearchParams(location.search);
+    const feature = params.get("feature");
+    const hud = params.get("hud");
+    if (import.meta.env.DEV && hud) {
+      const { demoSystem } = await import("./island/system");
+      (window as unknown as { __island: Island; __state: typeof State }).__island = island;
+      (window as unknown as { __state: typeof State }).__state = State;
+      window.setTimeout(() => {
+        island.fsm.forcePetit();
+        demoSystem(island, hud);
+      }, 1800);
+    } else if (import.meta.env.DEV && feature) {
       const { runFeatureDemo } = await import("../dev/features-demo");
       runFeatureDemo(island, feature);
     } else if (import.meta.env.DEV && location.search.includes("demo=usage")) {

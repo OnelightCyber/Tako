@@ -15,6 +15,7 @@ const EDGE: f64 = 12.0;
 const SNAP: f64 = 28.0;
 
 static DRAGGING: AtomicBool = AtomicBool::new(false);
+static LAST_SIZE: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
 
 struct Frame {
     x: f64,
@@ -62,7 +63,7 @@ fn frame(app: &AppHandle, screen: &str) -> Option<Frame> {
 
 fn preset(name: &str, f: &Frame, w: f64) -> (f64, f64) {
     let centre = f.x + f.w / 2.0;
-    let (gap, edge) = (GAP * f.scale, EDGE * f.scale);
+    let (gap, edge) = (GAP * f.scale * island::zoom(), EDGE * f.scale);
     match name {
         "island-left" => (centre - gap - w, f.y),
         "corner-right" => (f.x + f.w - w - edge, f.y + edge),
@@ -96,8 +97,8 @@ pub fn place(app: &AppHandle, width: f64, height: f64) {
     let Some(win) = app.get_webview_window(LABEL) else { return };
     let s = current(app);
     let Some(f) = frame(app, &s.screen) else { return };
-    let w = (width * f.scale).round().max(1.0);
-    let h = (height * f.scale).round().max(1.0);
+    let w = (width * f.scale * island::zoom()).round().max(1.0);
+    let h = (height * f.scale * island::zoom()).round().max(1.0);
     let _ = win.set_size(PhysicalSize::new(w as u32, h as u32));
     if !DRAGGING.load(Ordering::SeqCst) {
         let (x, y) = spot(&s, &f, w, h);
@@ -161,7 +162,15 @@ fn settle(app: &AppHandle, win: &WebviewWindow, start: PhysicalPosition<i32>) {
 
 #[tauri::command]
 pub fn usage_resize(app: AppHandle, width: f64, height: f64) {
+    *LAST_SIZE.lock().unwrap() = Some((width, height));
     place(&app, width, height);
+}
+
+pub fn replace(app: &AppHandle) {
+    let last = *LAST_SIZE.lock().unwrap();
+    if let Some((width, height)) = last {
+        place(app, width, height);
+    }
 }
 
 #[tauri::command]

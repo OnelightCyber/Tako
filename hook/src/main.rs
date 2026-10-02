@@ -6,7 +6,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 
 const FIRE_AND_FORGET_BUDGET: Duration = Duration::from_secs(2);
 
-const DECISION_BUDGET: Duration = Duration::from_secs(100);
+const DECISION_BUDGET: Duration = Duration::from_secs(115);
 
 const ERROR_PIPE_BUSY: i32 = 231;
 
@@ -24,7 +24,7 @@ const GATED_AGENT_TOOLS: &[&str] = &[
     "browser_navigate", "browser_navigate_back", "browser_click", "browser_type",
     "browser_fill_form", "browser_press_key", "browser_select_option", "browser_evaluate",
     "browser_run_code_unsafe", "browser_file_upload", "browser_drag", "browser_drop",
-    "browser_handle_dialog", "browser_tabs",
+    "browser_handle_dialog", "browser_tabs", "browser_close",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -32,17 +32,21 @@ enum Wait {
     None,
     Permission,
     AgentAction,
+    Prepare,
     Review,
 }
 
-fn wait_for(event: &str, origin: &str, tool: &str, review: bool) -> Wait {
+fn wait_for(event: &str, origin: &str, tool: &str, review: bool, agent_auto: bool) -> Wait {
     if event == "PermissionRequest" {
         return Wait::Permission;
     }
-    let browser_tool = tool.strip_prefix("mcp__playwright__").unwrap_or("");
-    let app_tool = tool == "mcp__tako__open_app";
-    if event == "PreToolUse" && origin == "chat" && (GATED_AGENT_TOOLS.contains(&browser_tool) || app_tool) {
-        return Wait::AgentAction;
+    if event == "PreToolUse" && origin == "chat" {
+        if let Some(action) = tool.strip_prefix("mcp__playwright__").filter(|a| !a.is_empty()) {
+            return if !agent_auto && GATED_AGENT_TOOLS.contains(&action) { Wait::AgentAction } else { Wait::Prepare };
+        }
+        if tool == "mcp__tako__open_app" && !agent_auto {
+            return Wait::AgentAction;
+        }
     }
     if event == "PreToolUse" && origin != "chat" && review && snapshot::EDIT_TOOLS.contains(&tool) {
         return Wait::Review;
@@ -116,6 +120,7 @@ fn main() {
     let json = match wait {
         Wait::Permission => decision.as_deref().and_then(decision_json),
         Wait::AgentAction => Some(agent_decision_json(decision.as_deref().unwrap_or("deny"))),
+        Wait::Prepare => prepare_json(decision.as_deref()),
         Wait::Review => review_decision_json(reachable, decision.as_deref()),
         Wait::None => None,
     };
@@ -128,12 +133,25 @@ fn main() {
     std::process::exit(0);
 }
 
+const BROWSER_FAILED: &str = "Tako couldn't start the browser (Chrome or Edge). Tell the user and continue without it.";
+
 fn agent_decision_json(decision: &str) -> String {
     match decision.trim() {
         "allow" | "always" => {
             r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}"#.to_string()
         }
-        _ => r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"The user did not allow this browser action in Tako."}}"#.to_string(),
+        "fail" => pre_tool_deny(BROWSER_FAILED),
+        _ => pre_tool_deny("The user did not allow this action in Tako."),
+    }
+}
+
+fn prepare_json(answer: Option<&str>) -> Option<String> {
+    match answer.map(str::trim) {
+        Some("closed") => Some(pre_tool_deny(
+            "The browser window is closed. Open a page with browser_navigate first; it starts the browser.",
+        )),
+        Some("fail") => Some(pre_tool_deny(BROWSER_FAILED)),
+        _ => None,
     }
 }
 
@@ -202,9 +220,14 @@ fn read_event() -> Option<(String, Wait)> {
     let data = snapshot::data_dir();
     let review_on = data.as_ref().map(|d| d.join("review-mode").exists()).unwrap_or(false);
     let mode = map.get("permission_mode").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    let wait = wait_for(&event, &origin, &tool, review_on && !hands_free(&mode));
-    if wait == Wait::AgentAction || wait == Wait::Review {
+    let agent_auto = std::env::var("TAKO_AGENT_AUTO").map(|v| v == "1").unwrap_or(false);
+    let wait = wait_for(&event, &origin, &tool, review_on && !hands_free(&mode), agent_auto);
+    if matches!(wait, Wait::AgentAction | Wait::Prepare | Wait::Review) {
         map.insert("await_decision".into(), serde_json::Value::Bool(true));
+    }
+    if wait == Wait::Prepare {
+        map.insert("tako_prepare".into(), serde_json::Value::Bool(true));
+        map.insert("tako_launch".into(), serde_json::Value::Bool(agent_auto));
     }
 
     let mut review_preview = None;
@@ -396,25 +419,48 @@ mod tests {
 
     #[test]
     fn only_the_chat_agents_acting_browser_tools_wait() {
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__open_app", false), Wait::AgentAction);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__screenshot", false), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "", "mcp__tako__open_app", false), Wait::None);
-        assert_eq!(wait_for("PermissionRequest", "", "Bash", false), Wait::Permission);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate", false), Wait::AgentAction);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click", false), Wait::AgentAction);
-        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_snapshot", false), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "", "mcp__playwright__browser_navigate", false), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "chat", "Read", false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__open_app", false, false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__screenshot", false, false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "mcp__tako__open_app", false, false), Wait::None);
+        assert_eq!(wait_for("PermissionRequest", "", "Bash", false, false), Wait::Permission);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate", false, false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click", false, false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_close", false, false), Wait::AgentAction);
+        assert_eq!(wait_for("PreToolUse", "", "mcp__playwright__browser_navigate", false, false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "chat", "Read", false, false), Wait::None);
+    }
+
+    #[test]
+    fn every_chat_browser_tool_lets_tako_prepare_the_browser_first() {
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_snapshot", false, false), Wait::Prepare);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_navigate", false, true), Wait::Prepare);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__browser_click", false, true), Wait::Prepare);
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__playwright__", false, false), Wait::None);
+        assert_eq!(wait_for("PostToolUse", "chat", "mcp__playwright__browser_navigate", false, false), Wait::None);
+    }
+
+    #[test]
+    fn auto_mode_opens_apps_without_asking() {
+        assert_eq!(wait_for("PreToolUse", "chat", "mcp__tako__open_app", false, true), Wait::None);
+    }
+
+    #[test]
+    fn prepare_answers_only_block_when_the_browser_cannot_be_used() {
+        assert_eq!(prepare_json(Some("allow")), None);
+        assert_eq!(prepare_json(None), None);
+        assert!(prepare_json(Some("closed")).unwrap().contains("browser_navigate"));
+        assert!(prepare_json(Some("fail")).unwrap().contains(r#""permissionDecision":"deny""#));
+        assert!(agent_decision_json("fail").contains("couldn't start the browser"));
     }
 
     #[test]
     fn review_mode_holds_edits_from_terminal_sessions_only() {
-        assert_eq!(wait_for("PreToolUse", "", "Edit", true), Wait::Review);
-        assert_eq!(wait_for("PreToolUse", "mission", "Write", true), Wait::Review);
-        assert_eq!(wait_for("PreToolUse", "", "Edit", false), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "chat", "Edit", true), Wait::None);
-        assert_eq!(wait_for("PreToolUse", "", "Bash", true), Wait::None);
-        assert_eq!(wait_for("PostToolUse", "", "Edit", true), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "Edit", true, false), Wait::Review);
+        assert_eq!(wait_for("PreToolUse", "mission", "Write", true, false), Wait::Review);
+        assert_eq!(wait_for("PreToolUse", "", "Edit", false, false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "chat", "Edit", true, false), Wait::None);
+        assert_eq!(wait_for("PreToolUse", "", "Bash", true, false), Wait::None);
+        assert_eq!(wait_for("PostToolUse", "", "Edit", true, false), Wait::None);
     }
 
     #[test]

@@ -14,11 +14,11 @@ fn usage_shown(app: &AppHandle) -> bool {
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Tako", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-    let usage = CheckMenuItem::with_id(app, "usage", "Usage widget", true, usage_shown(app), None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Ouvrir Tako", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Réglages…", true, None::<&str>)?;
+    let usage = CheckMenuItem::with_id(app, "usage", "Widget d'utilisation", true, usage_shown(app), None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
 

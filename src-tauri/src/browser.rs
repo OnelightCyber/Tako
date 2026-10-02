@@ -83,43 +83,84 @@ fn kill_tree(pid: u32) {
 }
 
 impl Browser {
-    pub async fn ensure(&self, visible: bool) -> Result<String, String> {
-        let cdp = self.ensure_chrome(visible).await?;
+    pub async fn link(&self) -> Result<String, String> {
+        let cdp = self.cdp_port().await?;
         self.ensure_server(cdp).await
     }
 
     pub async fn warm(&self) {
-        let cdp = active_port(&profile_dir()).unwrap_or_else(saved_port);
-        if let Err(err) = self.ensure_server(cdp).await {
+        if let Err(err) = self.link().await {
             log::line(format!("browser: {err}"));
         }
     }
 
-    async fn ensure_chrome(&self, visible: bool) -> Result<u16, String> {
+    pub fn server_running(&self) -> bool {
+        self.server.lock().unwrap().is_some()
+    }
+
+    pub async fn chrome_running(&self) -> bool {
+        let cdp = self.server.lock().unwrap().as_ref().map(|s| s.cdp);
+        match cdp {
+            Some(port) => port_open(port).await,
+            None => false,
+        }
+    }
+
+    pub async fn open(&self, visible: bool, launch: bool) -> Result<bool, String> {
+        let cdp = match self.server.lock().unwrap().as_ref().map(|s| s.cdp) {
+            Some(port) => port,
+            None => saved_port(),
+        };
         let known = self.chrome.lock().unwrap().as_ref().map(|c| (c.port, c.visible, c.pid));
-        if let Some((port, was_visible, pid)) = known {
-            if port_open(port).await {
-                if was_visible == visible || pid.is_none() {
-                    return Ok(port);
+        if port_open(cdp).await {
+            let mismatch = matches!(known, Some((port, was_visible, Some(_))) if port == cdp && was_visible != visible);
+            if !mismatch || !launch {
+                if known.map(|k| k.0) != Some(cdp) {
+                    *self.chrome.lock().unwrap() = Some(Chrome { pid: None, port: cdp, visible });
                 }
-                self.close_chrome();
+                return Ok(true);
+            }
+            self.close_chrome();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            while port_open(cdp).await && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(150)).await;
             }
         }
-        let profile = profile_dir();
-        if let Some(port) = active_port(&profile) {
+        if !launch {
+            return Ok(false);
+        }
+        self.launch_chrome(cdp, visible).await?;
+        Ok(true)
+    }
+
+    async fn cdp_port(&self) -> Result<u16, String> {
+        let known = self.chrome.lock().unwrap().as_ref().map(|c| c.port);
+        if let Some(port) = known {
+            if port_open(port).await {
+                return Ok(port);
+            }
+            *self.chrome.lock().unwrap() = None;
+        }
+        if let Some(port) = active_port(&profile_dir()) {
             if port_open(port).await {
                 save_port(port);
-                *self.chrome.lock().unwrap() = Some(Chrome { pid: None, port, visible });
+                *self.chrome.lock().unwrap() = Some(Chrome { pid: None, port, visible: true });
                 log::line(format!("browser: reusing the open window (debug port {port})"));
                 return Ok(port);
             }
         }
-        let exe = find_chromium().ok_or("Chrome ou Edge introuvable sur ce PC.")?;
+        let server = self.server.lock().unwrap().as_ref().map(|s| s.cdp);
         let mut port = saved_port();
-        if port_open(port).await {
+        if server != Some(port) && port_open(port).await {
             port = free_port().ok_or("Aucun port libre pour le navigateur.")?;
             save_port(port);
         }
+        Ok(port)
+    }
+
+    async fn launch_chrome(&self, port: u16, visible: bool) -> Result<(), String> {
+        let exe = find_chromium().ok_or("Chrome ou Edge introuvable sur ce PC.")?;
+        let profile = profile_dir();
         std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
         let mut cmd = Command::new(&exe);
@@ -137,7 +178,7 @@ impl Browser {
         while tokio::time::Instant::now() < deadline {
             if port_open(port).await {
                 *self.chrome.lock().unwrap() = Some(Chrome { pid: Some(pid), port, visible });
-                return Ok(port);
+                return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
@@ -153,7 +194,7 @@ impl Browser {
             self.stop();
         }
 
-        let port = free_port().ok_or("No free port for the browser.")?;
+        let port = free_port().ok_or("Aucun port libre pour le navigateur.")?;
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", "npx", "-y", "@playwright/mcp@latest", "--port"])
             .arg(port.to_string())
@@ -165,7 +206,7 @@ impl Browser {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW);
-        let child = cmd.spawn().map_err(|e| format!("Couldn't start the browser: {e}"))?;
+        let child = cmd.spawn().map_err(|e| format!("Impossible de démarrer le navigateur : {e}"))?;
         let pid = child.id();
         *self.server.lock().unwrap() = Some(Server { pid, port, cdp });
         log::line(format!("browser server starting on port {port} (pid {pid}, chrome {cdp})"));
@@ -179,18 +220,7 @@ impl Browser {
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         self.stop();
-        Err("The browser took too long to start. Is Node.js installed?".into())
-    }
-
-    pub async fn is_ready(&self, visible: bool) -> bool {
-        let chrome = self.chrome.lock().unwrap().as_ref().map(|c| (c.port, c.visible, c.pid));
-        let server = self.server.lock().unwrap().as_ref().map(|s| (s.port, s.cdp));
-        match (chrome, server) {
-            (Some((cdp, was_visible, pid)), Some((port, server_cdp))) if server_cdp == cdp && (was_visible == visible || pid.is_none()) => {
-                port_open(cdp).await && port_open(port).await
-            }
-            _ => false,
-        }
+        Err("Le navigateur met trop de temps à démarrer. Node.js est-il installé ?".into())
     }
 
     pub fn stop(&self) {
