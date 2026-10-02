@@ -9,9 +9,11 @@ export type PageId =
   | "appearance"
   | "claude"
   | "chat"
+  | "voice"
   | "usage"
   | "live"
   | "notifications"
+  | "lens"
   | "system"
   | "network"
   | "game"
@@ -55,6 +57,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { id: "claude", label: "Claude Code", icon: "code", tone: "orange" },
       { id: "chat", label: "Chat & agent", icon: "chat", tone: "blue" },
+      { id: "voice", label: "Assistant vocal", icon: "mic", tone: "orange" },
       { id: "usage", label: "Utilisation", icon: "gauge", tone: "amber" },
     ],
   },
@@ -63,6 +66,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { id: "live", label: "Activités en direct", icon: "layers", tone: "green" },
       { id: "notifications", label: "Notifications", icon: "bell", tone: "red" },
+      { id: "lens", label: "Lentille", icon: "clipboard", tone: "cyan" },
       { id: "system", label: "Système", icon: "cpu", tone: "cyan" },
       { id: "network", label: "Réseau & sécurité", icon: "shield", tone: "indigo" },
       { id: "game", label: "Mode jeu", icon: "gamepad", tone: "pink" },

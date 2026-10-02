@@ -185,6 +185,15 @@ function matches(query: string): Command[] {
   return [...starts, ...contains].slice(0, 6);
 }
 
+export interface AskOptions {
+  spoken?: boolean;
+  hint?: string;
+}
+
+export const ChatBus: { ask: ((query: string, options?: AskOptions) => Promise<string | null>) | null; busy: boolean } = { ask: null, busy: false };
+
+const SPOKEN_HINT = "Ta réponse sera lue à voix haute : réponds en français, en une à trois phrases courtes, sans markdown, sans liste et sans bloc de code.";
+
 export function buildPrompt(onHeightChange: () => void): ViewHost {
   const chipRow = h("div", { class: "chip-row" });
   const log = h("div", { class: "chat-log" });
@@ -280,8 +289,17 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     }
     input.value = "";
     renderMenu();
+    await run(query);
+  }
+
+  async function run(query: string, options: AskOptions = {}): Promise<string | null> {
+    if (sending) return null;
     sending = true;
+    ChatBus.busy = true;
+    const quiet = options.spoken === true;
     Sound.play("send");
+    let answer: string | null = null;
+    let failure: string | null = null;
 
     State.chatHistory.push({ id: nextId++, role: "user", content: query });
     State.chatPartial = "";
@@ -294,25 +312,38 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     const context: ChatContext | null =
       State.chatHistory.length === 1 && file ? { kind: "file", name: file.name, path: file.path } : null;
 
+    const extra = [options.spoken ? SPOKEN_HINT : "", options.hint ?? ""].filter(Boolean).join("\n\n");
+    const sent = extra ? `${query}\n\n${extra}` : query;
+
     try {
-      const reply = await Bridge.chatSend(query, context, chatCwd());
+      const reply = await Bridge.chatSend(sent, context, chatCwd());
       State.chatHistory.push({ id: nextId++, role: "assistant", content: reply.text });
       State.stateOverride = null;
+      answer = reply.text;
       Sound.play("finish");
     } catch (err) {
       State.stateOverride = null;
-      State.noteMessage = String(err).replace(/^Error:\s*/, "");
-      State.view = "note";
+      const message = String(err).replace(/^Error:\s*/, "");
+      if (quiet) {
+        failure = message;
+      } else {
+        State.noteMessage = message;
+        State.view = "note";
+      }
       Sound.play("error");
     } finally {
       State.chatPartial = "";
       State.chatStatus = "";
       sending = false;
+      ChatBus.busy = false;
       State.notify();
       onHeightChange();
-      input.focus();
+      if (!quiet) input.focus();
     }
+    if (failure) throw new Error(failure);
+    return answer;
   }
+  ChatBus.ask = run;
 
   async function showUsage(query: string) {
     sending = true;
@@ -415,7 +446,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const viaClaudeCode = State.chatBackend === "claude-code";
       input.placeholder = State.chatHistory.length > 0
         ? "Continue…"
-        : viaClaudeCode ? "Ask Claude, or type / for commands" : "Ask me anything…";
+        : viaClaudeCode ? "Demande à Claude, ou tape / pour les commandes" : "Demande-moi n'importe quoi…";
       input.disabled = sending;
       clearBtn.style.display = State.chatHistory.length > 0 || State.droppedFile ? "" : "none";
       clearBtn.disabled = sending;

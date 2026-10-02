@@ -28,7 +28,8 @@ export type IslandViewName =
   | "bluetooth"
   | "vpn"
   | "notifications"
-  | "today";
+  | "today"
+  | "voice";
 
 export type BotStateName =
   | "idle"
@@ -60,7 +61,7 @@ export const PANEL_H = 440;
 
 export const GROW = 1.3;
 
-export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished", "mission", "vpn", "approval", "question", "error", "note"]);
+export const GROWING_VIEWS: ReadonlySet<IslandViewName> = new Set(["session", "prompt", "review", "finished", "mission", "vpn", "approval", "question", "error", "note", "voice"]);
 
 const FREE_HEIGHT: Partial<Record<IslandViewName, [number, number]>> = {
   notifications: [150, 330],
@@ -114,6 +115,7 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   vpn: { height: 160, botX: 62, botY: null, botDiameter: 0, agentMode: "none" },
   notifications: { height: 268, botX: 0, botY: null, botDiameter: 0, agentMode: "none" },
   today: { height: 226, botX: 0, botY: null, botDiameter: 0, agentMode: "none" },
+  voice: { height: 168, botX: 74, botY: null, botDiameter: 62, agentMode: "none" },
 };
 
 export function chatPromptHeight(messageCount: number): number {

@@ -16,6 +16,7 @@ import {
 import { buildBluetooth, buildTimer, buildVpn, timerPill } from "./live";
 import { buildNotifications, homeCard, noticePill, privacyPill } from "./hub";
 import { buildToday } from "./today";
+import { buildVoice } from "./voice";
 import { Timer } from "../core/timer";
 
 export interface ViewActions {
@@ -340,6 +341,7 @@ function buildApproval(actions: ViewActions): ViewHost {
   const row = h("div", { class: "actions" });
   const body = stack(116, 16, who, code, row);
   const el = h("div", { class: "view fits" }, card("amber", body));
+  const hint = h("span", { class: "voice-hint" }, proIcon("mic", 11, 2.2), h("span", { text: "« Tako, oui » · « Tako, non »" }));
   let rowKey = "";
   return {
     el,
@@ -367,6 +369,9 @@ function buildApproval(actions: ViewActions): ViewHost {
         );
       }
       row.lastElementChild?.classList.toggle("guard", fresh);
+      const spoken = State.settings.voiceEnabled && State.settings.voiceApprovals;
+      if (spoken && !hint.isConnected) row.append(hint);
+      else if (!spoken && hint.isConnected) hint.remove();
       if (State.view === "approval") fit("approval", el, body);
     },
   };
@@ -546,6 +551,7 @@ export function buildViews(
   map.set("vpn", buildVpn(actions));
   map.set("notifications", buildNotifications(actions));
   map.set("today", buildToday(actions));
+  map.set("voice", buildVoice(actions));
 
   map.set("mail", buildPlaceholder("L'envoi par e-mail arrive bientôt.", ""));
   map.set("searching", buildPlaceholder("Claude cherche…", ""));

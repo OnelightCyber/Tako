@@ -119,7 +119,25 @@ export const Bridge = {
   downloadReveal: (path: string) => call<boolean>("download_reveal", { path }),
   notificationOpen: (appId: string) => call<boolean>("notification_open", { appId }),
   hudTest: (kind: string) => call<void>("hud_test", { kind }),
+  voiceListen: () => call<void>("voice_listen"),
+  voiceSay: (text: string) => callOrThrow<string>("voice_say", { text }),
 };
+
+export interface VoiceHeard {
+  kind: "wake" | "yes" | "no" | "stop";
+  text: string;
+  sure: boolean;
+}
+
+export interface VoiceFinal {
+  text: string;
+  error: string | null;
+}
+
+export interface LensInfo {
+  kind: "error" | "english" | "tracking" | "address";
+  text: string;
+}
 
 export interface VolumeInfo {
   level: number;

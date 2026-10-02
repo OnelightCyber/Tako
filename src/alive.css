@@ -1,0 +1,333 @@
+#island,
+#island.has-hud {
+  translate: -50% 0;
+  transform-origin: 50% 0;
+  transition:
+    box-shadow 0.3s ease,
+    scale 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#island.pressing,
+#island.has-hud.pressing {
+  scale: 0.955;
+  transition:
+    box-shadow 0.3s ease,
+    scale 0.42s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#glance {
+  position: absolute;
+  left: 62px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 166px;
+  display: none;
+  align-items: center;
+  gap: 7px;
+  font: 600 11.5px var(--font);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#glance.on {
+  display: flex;
+  animation: trail-in 0.35s ease;
+}
+
+#glance .gl-mic {
+  display: inline-grid;
+  place-items: center;
+  color: var(--dim-3);
+  flex: 0 0 auto;
+}
+
+#glance .gl-date {
+  font: 600 12px var(--font);
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+  flex: 0 0 auto;
+}
+
+#glance .gl-wx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--wx, var(--dim));
+  flex: 0 0 auto;
+}
+
+#glance .gl-wx span {
+  font: 600 12px var(--font);
+  color: var(--ink-2);
+}
+
+#glance .gl-name {
+  font: 600 11.5px var(--font);
+  color: var(--ink);
+  flex: 0 1 auto;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#glance .gl-step {
+  color: var(--dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#island.has-hud #glance {
+  opacity: 0;
+}
+
+.view {
+  filter: blur(5px);
+  transition:
+    opacity 0.16s ease-in,
+    filter 0.16s ease-in;
+}
+
+.view.on {
+  filter: none;
+  transition:
+    opacity 0.3s ease-out 0.16s,
+    transform 0.3s cubic-bezier(0.3, 1.2, 0.4, 1) 0.16s,
+    filter 0.32s ease-out 0.16s;
+}
+
+.calm .view,
+.calm .view.on {
+  filter: none;
+  transform: none;
+  transition: opacity 0.18s ease;
+}
+
+.calm #island,
+.calm #island.pressing {
+  scale: none;
+  transition: box-shadow 0.3s ease;
+}
+
+.calm #glance.on,
+.calm #trail.on {
+  animation: none;
+}
+
+.viz i {
+  background: var(--art, var(--green-2));
+}
+
+.mu-bar i {
+  background: var(--art, var(--ink));
+}
+
+.ms-art,
+.lb-art {
+  box-shadow: 0 0 12px -3px var(--art, transparent);
+}
+
+.voice-view {
+  --vo: #38bdf8;
+}
+
+.voice-view[data-tone="think"] {
+  --vo: #a78bfa;
+}
+
+.voice-view[data-tone="speak"] {
+  --vo: #34d399;
+}
+
+.voice-view[data-tone="fail"] {
+  --vo: #f4505e;
+}
+
+.voice-view[data-tone="idle"] {
+  --vo: #9398a1;
+}
+
+.vo-card {
+  --wash: color-mix(in srgb, var(--vo) 46%, transparent);
+}
+
+.vo-card.wash::after {
+  transition: background 0.4s ease;
+}
+
+.vo-body {
+  padding: 12px 16px 12px 134px;
+  gap: 6px;
+}
+
+.vo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 26px;
+}
+
+.vo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font: 650 10.5px var(--font);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--vo);
+  transition: color 0.3s ease;
+}
+
+.vo-status-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vo-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vo);
+  box-shadow: 0 0 8px var(--vo);
+  animation: vo-pulse 1.3s ease-in-out infinite;
+}
+
+.voice-view[data-tone="idle"] .vo-dot,
+.voice-view[data-tone="fail"] .vo-dot {
+  animation: none;
+  box-shadow: none;
+}
+
+@keyframes vo-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+}
+
+.vo-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.vo-btn {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    transform 0.2s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+
+.vo-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: scale(1.08);
+}
+
+.vo-btn:active {
+  transform: scale(0.92);
+}
+
+.vo-said {
+  font: 600 15px/1.3 var(--font);
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.vo-said.ghost {
+  font-weight: 500;
+  color: var(--dim-3);
+}
+
+.vo-answer {
+  max-height: 76px;
+  overflow-y: auto;
+  font: 400 13px/1.42 var(--font);
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.voice-view[data-tone="fail"] .vo-answer {
+  color: var(--red-text);
+}
+
+.vo-wave {
+  display: none;
+  align-items: center;
+  gap: 2.5px;
+  height: 24px;
+  margin-top: 2px;
+}
+
+.vo-wave.on,
+.vo-wave.think {
+  display: flex;
+}
+
+.vo-wave i {
+  flex: 0 0 3px;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--vo);
+  transform: scaleY(0.08);
+  transition: transform 0.07s linear;
+}
+
+.vo-wave.think i {
+  animation: vo-think 1.2s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * -0.06s);
+}
+
+@keyframes vo-think {
+  0%,
+  100% {
+    transform: scaleY(0.1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(0.42);
+    opacity: 1;
+  }
+}
+
+.calm .vo-wave.think i,
+.calm .vo-dot {
+  animation: none;
+}
+
+.voice-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  align-self: center;
+  font: 500 11px var(--font);
+  color: var(--dim-3);
+  white-space: nowrap;
+}

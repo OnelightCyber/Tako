@@ -23,6 +23,11 @@ use crate::{log, Shared};
 const EVERY: Duration = Duration::from_millis(1500);
 const CALM_TICKS: u32 = 2;
 const SHELL_CLASSES: &[&str] = &["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+const WORK_APPS: &[&str] = &[
+    "windowsterminal", "openconsole", "conhost", "cmd", "powershell", "pwsh", "wezterm-gui", "alacritty", "warp", "tabby", "hyper",
+    "code", "code - insiders", "cursor", "windsurf", "zed", "devenv", "idea64", "pycharm64", "webstorm64", "rider64", "clion64",
+    "goland64", "phpstorm64", "rustrover64", "datagrip64", "studio64", "sublime_text", "notepad++",
+];
 const NAMES: &[(&str, &str)] = &[
     ("robloxplayerbeta", "Roblox"),
     ("minecraft.windows", "Minecraft"),
@@ -36,6 +41,11 @@ const NAMES: &[(&str, &str)] = &[
     ("rocketleague", "Rocket League"),
     ("overwatch", "Overwatch 2"),
     ("eldenring", "Elden Ring"),
+    ("rainbowsix", "Rainbow Six Siege"),
+    ("dota2", "Dota 2"),
+    ("cod", "Call of Duty"),
+    ("helldivers2", "Helldivers 2"),
+    ("marvel-win64-shipping", "Marvel Rivals"),
     ("chrome", "Chrome"),
     ("msedge", "Edge"),
     ("firefox", "Firefox"),
@@ -74,6 +84,11 @@ pub fn is_game(quns: i32, fills_screen: bool, shell: bool, own: bool) -> bool {
         return false;
     }
     quns == QUNS_RUNNING_D3D_FULL_SCREEN.0 || quns == QUNS_BUSY.0 || quns == QUNS_PRESENTATION_MODE.0 || fills_screen
+}
+
+pub fn is_work_app(exe_stem: &str) -> bool {
+    let lower = exe_stem.to_lowercase();
+    WORK_APPS.contains(&lower.as_str())
 }
 
 pub fn pretty(exe_stem: &str) -> String {
@@ -137,8 +152,11 @@ fn detect() -> GameState {
     if !is_game(quns, fills, shell, own) {
         return GameState::default();
     }
-    let app = exe_stem(pid).map(|s| pretty(&s)).unwrap_or_default();
-    GameState { active: true, app }
+    let stem = exe_stem(pid).unwrap_or_default();
+    if is_work_app(&stem) {
+        return GameState::default();
+    }
+    GameState { active: true, app: pretty(&stem) }
 }
 
 fn apply(app: &AppHandle, now: &GameState) {
@@ -208,9 +226,20 @@ mod tests {
     }
 
     #[test]
+    fn terminals_and_editors_never_count_as_a_game() {
+        assert!(is_work_app("WindowsTerminal"));
+        assert!(is_work_app("Code"));
+        assert!(is_work_app("Cursor"));
+        assert!(is_work_app("pwsh"));
+        assert!(!is_work_app("RainbowSix"));
+        assert!(!is_work_app("chrome"));
+    }
+
+    #[test]
     fn known_games_get_their_real_name() {
         assert_eq!(pretty("RobloxPlayerBeta"), "Roblox");
         assert_eq!(pretty("FortniteClient-Win64-Shipping"), "Fortnite");
         assert_eq!(pretty("SomeIndieGame"), "SomeIndieGame");
+        assert_eq!(pretty("RainbowSix"), "Rainbow Six Siege");
     }
 }

@@ -9,7 +9,7 @@ import {
 import { Hud, type HudSpec } from "../core/hud";
 import { Sound } from "../core/sound";
 import { PLACEHOLDER_ID, State } from "../core/state";
-import { BotEngine, hexToRGB } from "../mascot/engine";
+import { BotEngine, hexToRGB, type VoiceMood } from "../mascot/engine";
 import { Greeting } from "../mascot/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mascot/minibots";
 import { UploadCanvas } from "../upload/canvas";
@@ -18,12 +18,14 @@ import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../vie
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
 import { decideCurrent } from "./hooks";
-import { LiveLayer, busySession, musicLive, type LiveKind } from "./bubble";
+import { LiveLayer, baseLiveKinds, busySession, liveKinds, musicLive, type LiveKind } from "./bubble";
 import { HudLayer, hudSize } from "./hud";
 import { Timer } from "../core/timer";
 import { feedViz, idleViz, vizEl } from "../views/viz";
 import { proIcon } from "../views/pro-icons";
 import { weatherIcon, weatherTone } from "../views/weather";
+import { VoiceUi } from "../views/voice";
+import { artColor } from "./art";
 
 const BOT_OVERHANG = 40;
 
@@ -36,6 +38,15 @@ const PRE_PROGRESS = USC.T_PROG_START - USC.T_DROP;
 const MAX_DROP_BYTES = 64 * 1024 * 1024;
 
 const modeOrder = (m: IslandMode) => (m === "hidden" ? 0 : m === "compact" ? 1 : 2);
+
+const LONG_PRESS_MS = 420;
+
+const DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+
+function shortDate(d: Date): string {
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
 
 export class Island {
   readonly fsm = new IslandStateMachine();
@@ -54,6 +65,7 @@ export class Island {
   private hudLayer!: HudLayer;
   private dots!: HTMLElement;
   private trail!: HTMLElement;
+  private glance!: HTMLElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -67,6 +79,10 @@ export class Island {
   private botCx = new Spring(46);
   private botCy = new Spring(16);
   private botSize = new Spring(10);
+  private jellyX = new Spring(0, 0.34, 0.42);
+  private jellyY = new Spring(0, 0.34, 0.42);
+  private lastW = NOTCH_W;
+  private lastH = 0;
 
   private engine = new BotEngine();
   private greeting = new Greeting();
@@ -101,9 +117,22 @@ export class Island {
   private quietReveal = false;
   private livePrimary: LiveKind | null = null;
   private wasSettling = false;
-  private metering = false;
+  private vizOn = false;
+  private meterOn = false;
+  private dancing = false;
+  private beatAvg = 0;
+  private lastBeatAt = 0;
+  private hotStreak = 0;
+  private asleep = false;
+  private voiceRelease: number | null = null;
+  private pressTimer: number | null = null;
+  private pressed = false;
+  private wheelAt = 0;
+  private wheelSum = 0;
+  private artKey = "";
   private dotsKey = "";
   private trailKey = "";
+  private glanceKey = "";
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -188,11 +217,20 @@ export class Island {
       Sound.play("blip");
       this.setView(kind === "bell" ? "notifications" : "today");
     });
+    this.glance = h("div", { id: "glance" });
+    this.glance.addEventListener("mousedown", (e) => {
+      if (!this.glance.dataset.kind || State.mode !== "compact") return;
+      e.stopPropagation();
+      Sound.play("blip");
+      if (this.glance.dataset.kind === "session") this.openLive("session");
+      else this.setView("today");
+    });
     window.setInterval(() => {
-      if (State.mode !== "compact" || this.trail.dataset.kind !== "clock") return;
+      if (State.mode !== "compact") return;
       this.dirty = true;
       this.ensureRunning();
     }, 15_000);
+    window.setInterval(() => this.ambient(), 3500);
 
     this.hudLayer = new HudLayer();
     this.header = buildHeader(actions);
@@ -228,6 +266,7 @@ export class Island {
       this.miniGrid,
       this.mediaStrip,
       this.countdown,
+      this.glance,
       this.trail,
       this.dots,
     );
@@ -256,7 +295,99 @@ export class Island {
   }
 
   audioLevel(peak: number) {
-    if (this.metering) feedViz(peak);
+    if (this.vizOn) feedViz(peak);
+    if (!this.dancing) return;
+    const now = performance.now();
+    this.beatAvg = this.beatAvg === 0 ? peak : this.beatAvg * 0.94 + peak * 0.06;
+    if (peak > 0.08 && peak > this.beatAvg * 1.22 && now - this.lastBeatAt > 300) {
+      this.lastBeatAt = now;
+      this.engine.beat((peak / Math.max(0.05, this.beatAvg) - 1) * 2.2);
+      this.ensureRunning();
+    }
+  }
+
+  voiceMood(mood: VoiceMood) {
+    this.engine.voice = mood;
+    if (mood === "off") {
+      this.engine.voiceLevel = 0;
+      this.engine.tgEs = 1;
+    }
+    this.ensureRunning();
+  }
+
+  voiceLevel(level: number) {
+    this.engine.voiceLevel = this.engine.voiceLevel * 0.45 + level * 0.55;
+    VoiceUi.push(level);
+    if (this.engine.voice !== "off") this.ensureRunning();
+  }
+
+  openVoice() {
+    if (this.voiceRelease != null) window.clearTimeout(this.voiceRelease);
+    this.voiceRelease = null;
+    State.isPinned = true;
+    this.alert("voice");
+  }
+
+  releaseVoice(delayMs: number) {
+    if (!State.pendingApproval) {
+      State.isPinned = false;
+      this.fsm.pinned = false;
+    }
+    if (this.voiceRelease != null) window.clearTimeout(this.voiceRelease);
+    this.voiceRelease = window.setTimeout(() => {
+      this.voiceRelease = null;
+      if (State.mode === "expanded" && State.view === "voice" && !this.wasInIsland && !State.isPinned) this.collapse();
+    }, delayMs);
+  }
+
+  celebrate() {
+    if (!State.settings.mascotAlive || State.settings.calmMotion) return;
+    this.engine.celebrate();
+    this.ensureRunning();
+  }
+
+  private botShown(): boolean {
+    if (State.mode === "compact") return !Hud.current;
+    if (State.mode !== "expanded" || State.view === "greeting" || this.uploadActive) return false;
+    return VIEW_LAYOUTS[State.view].botDiameter > 0;
+  }
+
+  private sleepy(): boolean {
+    if (!State.settings.mascotAlive || State.mode === "expanded" || State.effectiveState !== "idle") return false;
+    const hour = new Date().getHours();
+    return hour < 6 && performance.now() - State.lastActivity > 120_000;
+  }
+
+  private ambient() {
+    const s = State.stats;
+    this.hotStreak = State.settings.mascotAlive && s && s.cpu >= 85 ? this.hotStreak + 1 : 0;
+    if (this.hotStreak >= 2 && State.mode !== "hidden" && this.botShown() && !State.settings.calmMotion) {
+      this.engine.emit("sweat", 1);
+      this.ensureRunning();
+    }
+    const sleepy = this.sleepy();
+    if (sleepy !== this.asleep) {
+      this.asleep = sleepy;
+      this.dirty = true;
+      this.ensureRunning();
+    }
+  }
+
+  private shiftLive(direction: number) {
+    const kinds = baseLiveKinds();
+    if (kinds.length < 2) return;
+    const current = Math.max(0, kinds.indexOf(liveKinds()[0]));
+    const next = kinds[(current + direction + kinds.length) % kinds.length];
+    State.livePreferred = next === kinds[0] ? null : next;
+    Sound.play("blip");
+    this.nudge(direction);
+    State.notify();
+  }
+
+  private nudge(direction: number) {
+    if (State.settings.calmMotion) return;
+    this.jellyX.velocity += direction * 0.9;
+    this.ensureRunning();
   }
 
   private onHud() {
@@ -582,7 +713,9 @@ export class Island {
     this.islandEl.style.width = `${w}px`;
     this.islandEl.style.height = `${hh}px`;
     this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
-    this.islandEl.style.transform = `translateX(-50%)`;
+    const jx = this.jellyX.value;
+    const jy = this.jellyY.value;
+    this.islandEl.style.transform = jx || jy ? `scale(${(1 + jx).toFixed(4)}, ${(1 + jy).toFixed(4)})` : "";
 
     this.miniGrid.style.left = `${w - 40 - 14.5}px`;
     this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
@@ -640,7 +773,26 @@ export class Island {
       Sound.resume();
       State.lastActivity = performance.now();
       if (State.mode !== "expanded") {
-        this.fsm.click();
+        if (e.button !== 0 || this.fsm.state !== "petit") {
+          this.fsm.click();
+          return;
+        }
+        this.pressed = true;
+        this.islandEl.classList.add("pressing");
+        if (this.pressTimer != null) window.clearTimeout(this.pressTimer);
+        this.pressTimer = window.setTimeout(() => {
+          this.pressTimer = null;
+          if (!this.pressed) return;
+          this.pressed = false;
+          this.islandEl.classList.remove("pressing");
+          const kinds = liveKinds();
+          const kind = (State.livePreferred as LiveKind | null) && kinds.includes(State.livePreferred as LiveKind) ? (State.livePreferred as LiveKind) : kinds[0];
+          if (kind) this.openLive(kind);
+          else {
+            Sound.play("blip");
+            this.setView("today");
+          }
+        }, LONG_PRESS_MS);
         return;
       }
       if (this.isBotHit(e.clientX, e.clientY)) {
@@ -648,6 +800,38 @@ export class Island {
         this.engine.slap();
       }
     });
+
+    const release = () => {
+      if (!this.pressed) return;
+      this.pressed = false;
+      this.islandEl.classList.remove("pressing");
+      if (this.pressTimer != null) window.clearTimeout(this.pressTimer);
+      this.pressTimer = null;
+      if (State.mode !== "expanded") this.fsm.click();
+    };
+    window.addEventListener("mouseup", release);
+    this.islandEl.addEventListener("mouseleave", () => {
+      if (!this.pressed) return;
+      this.pressed = false;
+      this.islandEl.classList.remove("pressing");
+      if (this.pressTimer != null) window.clearTimeout(this.pressTimer);
+      this.pressTimer = null;
+    });
+
+    this.islandEl.addEventListener("wheel", (e) => {
+      if (State.mode !== "compact") return;
+      const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+      if (!sideways) return;
+      e.preventDefault();
+      const now = performance.now();
+      if (now - this.wheelAt > 260) this.wheelSum = 0;
+      this.wheelAt = now;
+      this.wheelSum += sideways;
+      if (Math.abs(this.wheelSum) < 40) return;
+      const direction = this.wheelSum > 0 ? 1 : -1;
+      this.wheelSum = -direction * 400;
+      this.shiftLive(direction);
+    }, { passive: false });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && State.mode === "expanded" && !State.isPinned) this.collapse();
@@ -700,6 +884,12 @@ export class Island {
       y >= hit.y - HIT_MARGIN && y <= hit.y + hit.h + HIT_MARGIN;
 
     if (inIsland && !this.wasInIsland) {
+      if (this.asleep) {
+        this.asleep = false;
+        State.lastActivity = performance.now();
+        this.engine.stretch();
+        this.dirty = true;
+      }
       if (this.fsm.state === "tako") this.greeting.hover();
       this.fsm.mouseEntered();
       this.homeCollapseAt = null;
@@ -795,6 +985,7 @@ export class Island {
     this.width.step(dt, nowMs);
     this.height.step(dt, nowMs);
     this.radius.step(dt, nowMs);
+    this.stepJelly(dt);
     this.applyGeometry();
 
     if (this.dirty) {
@@ -837,7 +1028,7 @@ export class Island {
     const busy = State.mode === "hidden"
       ? settling || this.dirty
       : settling || this.dirty ||
-        !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
+        !this.botCx.settled || !this.botCy.settled || !this.botSize.settled || this.jellyMoving ||
         greetingActive || this.engine.busy || UploadSeq.isActive || this.live.animating ||
         this.views.get(State.view)?.animating?.() === true;
 
@@ -848,6 +1039,31 @@ export class Island {
       Sound.idle();
     }
   };
+
+  private get jellyMoving(): boolean {
+    return Math.abs(this.jellyX.value) > 0.0015 || Math.abs(this.jellyY.value) > 0.0015 ||
+      Math.abs(this.jellyX.velocity) > 0.01 || Math.abs(this.jellyY.velocity) > 0.01;
+  }
+
+  private stepJelly(dt: number) {
+    const w = this.width.value;
+    const hh = this.height.value;
+    const calm = State.settings.calmMotion || State.mode === "hidden";
+    if (dt > 0) {
+      const vw = (w - this.lastW) / dt;
+      const vh = (hh - this.lastH) / dt;
+      this.jellyX.target = calm ? 0 : clamp(vw / 30000 - vh / 34000, -0.035, 0.035);
+      this.jellyY.target = calm ? 0 : clamp(vh / 16000 - vw / 42000, -0.05, 0.05);
+    }
+    this.lastW = w;
+    this.lastH = hh;
+    this.jellyX.step(dt);
+    this.jellyY.step(dt);
+    if (!this.jellyMoving) {
+      this.jellyX.set(0);
+      this.jellyY.set(0);
+    }
+  }
 
   private updateBotTargets() {
     const p = botPosition(State.mode, State.view, this.height.value, State.uploadProgress);
@@ -1013,20 +1229,26 @@ export class Island {
         this.mediaStrip.append(art, h("span", { class: "ms-title", text: m.title }), vizEl(4, "ms-viz"));
       }
     }
-    const wantMeter = State.settings.visualizer && musicLive() && !hudOn && (
+    const wantViz = State.settings.visualizer && musicLive() && !hudOn && (
       (State.mode === "compact" && (live.primary === "music" || live.secondary === "music")) ||
       (State.mode === "expanded" && State.view === "music"));
-    if (wantMeter !== this.metering) {
-      this.metering = wantMeter;
+    if (!wantViz && this.vizOn) idleViz(true);
+    this.vizOn = wantViz;
+    this.dancing = State.settings.mascotAlive && !State.settings.calmMotion && musicLive() && State.mode !== "hidden" && this.botShown();
+    const wantMeter = wantViz || this.dancing;
+    if (wantMeter !== this.meterOn) {
+      this.meterOn = wantMeter;
       void Bridge.audioMeter(wantMeter);
-      if (!wantMeter) idleViz(true);
     }
+    this.syncArt();
     this.syncDots(hudOn);
 
     const showGrid = State.mode === "compact" && !hudOn;
     this.miniGrid.style.opacity = showGrid ? "1" : "0";
     const others = showGrid ? State.otherTasks.slice(0, 4) : [];
     this.syncTrail(showGrid && others.length === 0 && live.primary !== "call" && live.primary !== "download");
+    const leftBusy = live.primary === "timer" || live.primary === "call" || live.primary === "download" || showStrip;
+    this.syncGlance(showGrid && !leftBusy, live.primary);
     if (showGrid) {
       const key = others.map((t) => t.id).join("|");
       if (this.miniGrid.dataset.key !== key) {
@@ -1040,22 +1262,71 @@ export class Island {
     }
 
     syncMiniBotStates(State.tasks);
-    this.engine.setState(State.effectiveState);
+    this.root.classList.toggle("calm", State.settings.calmMotion);
+    this.engine.setState(this.asleep && State.effectiveState === "idle" ? "sleeping" : State.effectiveState);
     this.followContentSize();
   }
 
-  private syncTrail(on: boolean) {
+  private syncArt() {
+    const m = State.media;
+    const art = State.settings.mediaEnabled && m?.active && m.art?.startsWith("data:image/") ? m.art : null;
+    const key = art ? `${art.length}:${art.slice(-48)}` : "";
+    if (key === this.artKey) return;
+    this.artKey = key;
+    if (!art) {
+      document.documentElement.style.removeProperty("--art");
+      return;
+    }
+    void artColor(art).then((color) => {
+      if (this.artKey !== key) return;
+      if (color) document.documentElement.style.setProperty("--art", color);
+      else document.documentElement.style.removeProperty("--art");
+    });
+  }
+
+  private syncGlance(on: boolean, primary: LiveKind | null) {
     const w = State.weather;
+    const session = primary === "session" ? busySession() : null;
+    const kind = !on ? "" : session ? "session" : "idle";
+    const mic = State.settings.voiceEnabled && !State.gameMode && !State.paused;
+    const now = new Date();
+    const date = shortDate(now);
+    const wx = kind === "idle" && State.settings.weatherEnabled && w ? `${Math.round(w.temp)}~${w.code}~${w.isDay}` : "";
+    const step = session ? session.steps.at(-1) ?? "" : "";
+    const key = `${kind}~${date}~${wx}~${mic}~${session?.id ?? ""}~${session?.name ?? ""}~${step}`;
+    this.glance.classList.toggle("on", !!kind);
+    if (key === this.glanceKey) return;
+    this.glanceKey = key;
+    this.glance.dataset.kind = kind;
+    this.glance.replaceChildren();
+    this.glance.title = "";
+    if (!kind) return;
+    if (mic) this.glance.append(h("i", { class: "gl-mic", title: "Dis « Hey Tako »" }, proIcon("mic", 11, 2.2)));
+    if (session) {
+      this.glance.append(h("b", { class: "gl-name", text: session.name }));
+      if (step) this.glance.append(h("span", { class: "gl-step", text: step }));
+      this.glance.title = step ? `${session.name} · ${step}` : session.name;
+      return;
+    }
+    this.glance.append(h("span", { class: "gl-date", text: date }));
+    if (wx && w) {
+      const chip = h("span", { class: "gl-wx" }, proIcon(weatherIcon(w), 13, 2), h("span", { text: `${Math.round(w.temp)}°` }));
+      chip.style.setProperty("--wx", weatherTone(w));
+      this.glance.append(chip);
+      this.glance.title = w.city;
+    }
+  }
+
+  private syncTrail(on: boolean) {
     let kind = "";
     if (on) {
       if (State.settings.notificationsEnabled && State.unreadNotices > 0) kind = "bell";
-      else if (State.settings.weatherEnabled && w) kind = "wx";
       else kind = "clock";
     }
     this.trail.classList.toggle("on", !!kind);
     const now = new Date();
     const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const key = kind === "bell" ? `bell${State.unreadNotices}` : kind === "wx" && w ? `wx${Math.round(w.temp)}${w.code}${w.isDay}` : kind === "clock" ? `clock${clock}` : "";
+    const key = kind === "bell" ? `bell${State.unreadNotices}` : kind === "clock" ? `clock${clock}` : "";
     if (key === this.trailKey) return;
     this.trailKey = key;
     this.trail.dataset.kind = kind;
@@ -1065,10 +1336,6 @@ export class Island {
       const n = State.unreadNotices;
       this.trail.append(proIcon("bell", 12, 2.2), h("b", { text: n > 9 ? "9+" : String(n) }));
       this.trail.title = `${n} notification${n > 1 ? "s" : ""} non lue${n > 1 ? "s" : ""}`;
-    } else if (kind === "wx" && w) {
-      this.trail.style.setProperty("--wx", weatherTone(w));
-      this.trail.append(proIcon(weatherIcon(w), 14, 2), h("span", { text: `${Math.round(w.temp)}°` }));
-      this.trail.title = w.city;
     } else if (kind === "clock") {
       this.trail.append(h("span", { text: clock }));
     }

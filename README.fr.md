@@ -159,10 +159,51 @@ limite de 5 h repart à zéro, et garde un **historique** dans les réglages : c
 - **Minuteur & Pomodoro** : cycles focus / pause / grande pause, le temps dans un anneau autour du personnage, une
   alarme animée, et l'îlot reste visible tant qu'il tourne.
 - **Mode jeu** : un jeu ou une vidéo en plein écran et rien ne s'ouvre — l'îlot et le widget se cachent, les clics
-  vont au jeu, les sons se coupent. À ton retour, une ligne te dit ce que tu as raté.
+  vont au jeu, les sons se coupent. À ton retour, une ligne te dit ce que tu as raté. Un terminal ou un éditeur en
+  plein écran ne compte jamais comme un jeu.
 - **Bluetooth** : un casque se connecte et l'îlot l'affiche avec sa batterie, comme sur iPhone.
 - **Surveillance du VPN** : Mullvad, WireGuard, NordVPN, Proton… si le tunnel tombe, une alerte rouge te prévient que
   ton IP réelle est visible ; quand il revient, une verte avec le lieu.
+
+### Tako en mode Jarvis
+
+- **« Hey Tako »** : dis-le et l'îlot s'ouvre, le personnage penche la tête et t'écoute, avec des barres qui suivent
+  ta voix. Pose ta question à voix haute : Claude répond avec ton propre compte Claude Code et Tako lit la réponse
+  avec la voix française de Windows. « Tako, stop » coupe la parole.
+- **Réponses instantanées** : l'heure, la date, la météo, « mets un minuteur de 10 minutes », « pause », « musique
+  suivante » — tout de suite, sans Claude.
+- **Permissions à la voix** (en option) : « Tako, oui » autorise et « Tako, non » refuse la demande affichée. Un
+  « oui » ne compte que si Tako est sûr de l'avoir entendu.
+- La musique se met en pause pendant que Tako écoute ou parle, puis reprend. Coupé pendant un appel et en mode jeu.
+
+### La Lentille
+
+Copie quelque chose et l'îlot propose quoi en faire :
+
+- **Une erreur** → **Expliquer** avec Claude, ou **Réparer** : une mission Claude Code prête à lancer dans ton
+  dernier projet.
+- **Un texte en anglais** → **Traduire** en français.
+- **Un numéro de colis** → **Suivre** le colis (La Poste, Colissimo, UPS, DHL…).
+- **Une adresse** → **Itinéraire** ou la carte dans Google Maps.
+
+Le texte copié est lu sur ton PC, seulement pour le reconnaître ; rien ne part tant que tu ne cliques pas. Ce que
+tu copies depuis un gestionnaire de mots de passe est ignoré.
+
+### Un personnage qui vit sa vie
+
+Le personnage **danse sur ta musique** (sur le vrai rythme du son de ton PC), **transpire** quand le processeur est
+à fond, **s'endort la nuit** quand rien ne se passe et s'étire quand tu reviens, et **fait la fête quand tes tests
+passent** dans une session Claude Code — avec une bulle « Tests réussis ».
+
+### Des animations comme sur iPhone
+
+- **Effet gelée** : l'îlot s'étire et ondule un peu quand il grandit et se replie.
+- **Appui long** sur l'îlot replié pour ouvrir l'activité en cours ; **Maj + molette** (ou un glissement latéral sur
+  le pavé tactile) pour passer d'une activité à l'autre.
+- Les vues se fondent avec un flou, les barres du visualiseur prennent **les couleurs de la pochette**, et un réglage
+  « Réduire les animations » calme tout.
+- **Les deux côtés de l'îlot** : la date et la météo (ou ce que fait Claude) à gauche, l'heure ou tes notifications
+  à droite.
 
 ### Et aussi
 
@@ -326,14 +367,18 @@ exactement ce qui se passe : chacun utilise son propre compte, sur sa machine.
   écrire un message de commit, et le bouton Commit ne les committe pas.
 - **`settings.json` n'est jamais écrasé** : fusion, diff affiché, sauvegarde datée, écriture seulement après ton clic
   et seulement si le fichier n'a pas changé depuis le diff.
-- **Aucune permission accordée sans clic explicite.**
+- **Aucune permission accordée sans clic explicite** — ou, seulement si tu l'actives, un « Tako, oui » explicite.
 - **Secrets** dans le Gestionnaire d'identification Windows (service `dev.tako.island`) ; l'interface peut seulement
   demander si une clé existe.
 - **Pas de télémétrie.** Les requêtes réseau vont vers les services que tu configures, et vers Claude via ton propre
-  Claude Code.
+  Claude Code. Le mot de réveil « Hey Tako » est reconnu sur ton PC ; ta question parlée passe par la dictée de
+  Windows (reconnaissance vocale en ligne de Microsoft) seulement si tu actives l'assistant vocal.
+- **La Lentille lit, n'envoie pas** : le texte copié est reconnu sur place ; il ne part vers Claude, un transporteur
+  ou Google Maps que quand tu cliques sur une action, et les copies des gestionnaires de mots de passe sont ignorées.
 - **Rien n'est injecté en HTML** : le code de tes fichiers est construit nœud par nœud, jamais via `innerHTML`.
 - **0 % de CPU caché** : animations, suivi du curseur, musique et stats du PC s'arrêtent ; seules 8 lectures Win32
-  par seconde guettent un fichier glissé vers l'îlot caché.
+  par seconde guettent un fichier glissé vers l'îlot caché, plus la reconnaissance vocale de Windows quand
+  l'assistant vocal est activé.
 - **Le relais vérifie à qui il parle** : le pipe nommé est lié à ton compte Windows (SID) et le serveur est contrôlé
   avant chaque envoi. Les programmes qui tournent sous ton propre compte sont considérés comme fiables, comme pour
   tout ce qu'ils peuvent déjà faire en ton nom.
@@ -418,6 +463,8 @@ src-tauri/src/            backend Rust
   widget.rs               la fenêtre du widget : places, drag, aimantation
   sessions.rs             contexte, bilan du tour, Annuler, Commit, diff, missions
   media.rs                ce qui joue (sessions média Windows)
+  voice.rs                « Hey Tako », dictée et voix de Windows
+  clipboard.rs            la Lentille : ce que tu copies, reconnu sur place
   sysstats.rs             processeur, mémoire, carte graphique
   browser.rs              serveur Playwright persistant de l'agent
   updater.rs              mises à jour signées depuis les releases GitHub
@@ -451,6 +498,8 @@ docs/                     bannière, GIF et captures
 - [x] **Bilan du tour** avec Commit, diff et Annuler, et un **mode relecture** en option
 - [x] **Missions** depuis un raccourci global
 - [x] Alertes de limite, prévision et historique ; musique ; stats du PC
+- [x] **Îlot multifonction** : HUD à l'iPhone, notifications, appels, téléchargements, météo
+- [x] **Mode Jarvis**, **Lentille**, personnage vivant et animations à la Apple
 - [ ] Réglages en anglais
 - [ ] **Monitoring serveurs** : up / down, CPU, RAM, disque, conteneurs
 - [ ] **Garde-fous de session** : bloquer les commandes dangereuses, signaler l'accès aux secrets

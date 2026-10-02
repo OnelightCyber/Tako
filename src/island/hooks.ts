@@ -211,7 +211,21 @@ function findActivity(task: AgentTask, payload: HookPayload): Activity | undefin
 
 const loggedShapes = new Set<string>();
 
-function finishActivity(task: AgentTask, payload: HookPayload, failed: boolean) {
+const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\b(vitest|jest|mocha|playwright\s+test)\b|\bpytest\b|\bpython3?\s+-m\s+(pytest|unittest)\b|\bcargo\s+(test|nextest)\b|\bgo\s+test\b|\bdotnet\s+test\b|\b(mvn|gradle|gradlew)\s+test\b|\brspec\b|\bphpunit\b|\bmix\s+test\b|\bdeno\s+test\b/;
+const TEST_FAILED = /\b[1-9]\d* (failed|failing|failures?|errors?)\b|\bFAILED\b|\bFAIL\b|\bfailures=[1-9]/;
+
+export function testSummary(command: string, output: string): string | null {
+  if (!TEST_COMMAND.test(command)) return null;
+  const out = output.slice(-8000);
+  if (TEST_FAILED.test(out)) return null;
+  let total = 0;
+  for (const m of out.matchAll(/test result: ok\. (\d+) passed/g)) total += Number(m[1]);
+  const found = total || Number((/\bTests?:?\s+(\d+) passed\b/.exec(out) ?? /(\d+) (passed|passing)\b/i.exec(out) ?? /\bOK \((\d+) tests?\)/.exec(out) ?? /\bRan (\d+) tests?\b[\s\S]*\bOK\b/.exec(out) ?? [])[1] ?? 0);
+  if (found > 0) return `${found} test${found > 1 ? "s" : ""} au vert`;
+  return /\ball tests passed\b|\btests? passed\b|^ok\s|\bPASS\b/im.test(out) ? "Tous les tests passent" : null;
+}
+
+function finishActivity(task: AgentTask, payload: HookPayload, failed: boolean): Activity | undefined {
   const tool = payload.tool_name ?? "Tool";
   if (!loggedShapes.has(tool)) {
     loggedShapes.add(tool);
@@ -221,6 +235,7 @@ function finishActivity(task: AgentTask, payload: HookPayload, failed: boolean) 
   }
   const a = findActivity(task, payload);
   if (a) applyPost(a, payload.tool_response, failed, payload.error);
+  return a;
 }
 
 function settleActivity(task: AgentTask) {
@@ -459,10 +474,19 @@ export function handleHook(island: Island, payload: HookPayload) {
       break;
     }
 
-    case "PostToolUse":
+    case "PostToolUse": {
       task.state = "working";
-      finishActivity(task, payload, false);
+      const done = finishActivity(task, payload, false);
+      const passed = done?.kind === "shell" ? testSummary(done.command ?? "", done.output ?? "") : null;
+      if (passed) {
+        island.celebrate();
+        if (State.mode !== "expanded") {
+          island.hud({ key: `tests-${task.id}`, tone: "#34D399", icon: "check", title: "Tests réussis", detail: passed, meta: task.name, metaTone: "#34D399", ms: 3200, priority: 1 });
+        }
+        Sound.play("approve");
+      }
       break;
+    }
 
     case "PostToolUseFailure":
       task.state = "working";

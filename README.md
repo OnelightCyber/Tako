@@ -155,10 +155,50 @@ Tako also **warns you at 80 % and 90 %** with the time you'll hit the limit at t
 - **Timer & Pomodoro**: focus / break / long break cycles, the time in a ring around the character, an animated
   alarm, and the island stays visible while it runs.
 - **Game mode**: a game or a video in full screen and nothing opens — the island and the widget hide, clicks go to
-  the game, sounds are muted. When you're back, one line tells you what you missed.
+  the game, sounds are muted. When you're back, one line tells you what you missed. A terminal or an editor in full
+  screen never counts as a game.
 - **Bluetooth**: headphones connect and the island shows them with their battery, like on an iPhone.
 - **VPN watch**: Mullvad, WireGuard, NordVPN, Proton… if the tunnel drops, a red alert tells you your real IP is
   visible; when it's back, a green one with the location.
+
+### Tako as Jarvis
+
+- **"Hey Tako"**: say it and the island opens, the character tilts its head and listens, with bars that follow your
+  voice. Ask your question out loud: Claude answers through your own Claude Code account and Tako reads the answer
+  with Windows' French voice. "Tako, stop" cuts it short.
+- **Instant answers**: the time, the date, the weather, "set a timer for 10 minutes", "pause", "next song" — answered
+  right away, without Claude.
+- **Voice approvals** (opt-in): "Tako, oui" allows and "Tako, non" denies the permission on screen. A "yes" only
+  counts when Tako is sure it heard it.
+- The music pauses while Tako listens or speaks, then resumes. Off during calls and in game mode.
+
+### The Lens
+
+Copy something and the island suggests what to do with it:
+
+- **An error** → **Explain** with Claude, or **Fix**: a Claude Code mission ready to launch in your last project.
+- **English text** → **Translate** into French.
+- **A tracking number** → **Track** the parcel (La Poste, Colissimo, UPS, DHL…).
+- **An address** → **Directions** or the map in Google Maps.
+
+The copied text is only read on your PC to recognise it; nothing leaves until you click. Anything copied from a
+password manager is ignored.
+
+### A character with a life
+
+The character **dances to your music** (on the real beat of your PC's sound), **sweats** when the processor is
+maxed out, **falls asleep at night** when nothing happens and stretches when you come back, and **celebrates when
+your tests pass** in a Claude Code session — with a "Tests passed" bubble.
+
+### Motion like on an iPhone
+
+- **Jelly**: the island stretches and wobbles a little as it grows and shrinks.
+- **Long press** on the folded island opens the activity in progress; **Shift + wheel** (or a sideways swipe on the
+  touchpad) switches between activities.
+- Views cross-fade with a blur, the visualiser bars take the **colours of the album art**, and a "Reduce motion"
+  setting calms everything down.
+- **Both sides of the island**: the date and the weather (or what Claude is doing) on the left, the time or your
+  notifications on the right.
 
 ### And also
 
@@ -321,13 +361,17 @@ exactly what happens here: everyone uses their own account, on their own machine
   copied, and their contents are never sent to Claude to write a commit message, nor committed by the Commit button.
 - **`settings.json` is never overwritten**: merge, diff shown, dated backup, written only after your click and only
   if the file hasn't changed since the diff.
-- **No permission is granted without an explicit click.**
+- **No permission is granted without an explicit click** — or, only if you turn it on, an explicit "Tako, oui".
 - **Secrets** live in the Windows Credential Manager (service `dev.tako.island`); the interface can only ask whether
   a key exists.
 - **No telemetry.** Network requests only go to the services you set up, and to Claude through your own Claude Code.
+  The "Hey Tako" wake word is recognised on your PC; your spoken question goes through Windows dictation (Microsoft's
+  online speech recognition) only when you turn the voice assistant on.
+- **The Lens reads, never sends**: copied text is classified locally; it only goes to Claude, a carrier or Google
+  Maps when you click an action, and password managers' copies are skipped.
 - **Nothing is injected as HTML**: code from your files is built node by node, never through `innerHTML`.
 - **0 % CPU while hidden**: animations, the cursor poll, music and PC stats stop; only 8 Win32 reads per second watch
-  for a file being dragged towards the hidden island.
+  for a file being dragged towards the hidden island, plus Windows' speech recognizer when the voice assistant is on.
 - **The relay checks who it talks to**: the named pipe is bound to your Windows account (SID) and the server is
   verified before anything is sent. Programs running under your own account are trusted, like everything else they
   can already do as you.
@@ -412,6 +456,8 @@ src-tauri/src/            Rust backend
   widget.rs               the widget window: spots, drag, snap
   sessions.rs             context, turn summary, undo, commit, diff, missions
   media.rs                what's playing (Windows media sessions)
+  voice.rs                "Hey Tako", dictation and Windows' voice
+  clipboard.rs            the Lens: what you copy, recognised locally
   sysstats.rs             CPU, memory, GPU
   browser.rs              the agent's persistent Playwright server
   updater.rs              signed updates from GitHub releases
@@ -445,6 +491,8 @@ docs/                     banner, GIF and screenshots
 - [x] **Turn summary** with Commit, diff and Undo, and an optional **review mode**
 - [x] **Missions** from a global shortcut
 - [x] Limit alerts, forecast and history; music; PC stats
+- [x] **Multi-purpose island**: iPhone-style HUDs, notifications, calls, downloads, weather
+- [x] **Jarvis mode**, **the Lens**, a living character and Apple-grade motion
 - [ ] English settings window
 - [ ] **Server monitoring**: up / down, CPU, RAM, disk, containers
 - [ ] **Session guardrails**: block dangerous commands, flag access to secrets

@@ -3,6 +3,7 @@ import "./session.css";
 import "./extra.css";
 import "./live.css";
 import "./hud.css";
+import "./alive.css";
 import { Bridge, IS_TAURI, onEvent } from "./core/bridge";
 import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
@@ -12,6 +13,8 @@ import { registerIntegrationHandlers, refreshConfigured } from "./island/integra
 import { registerExtras } from "./island/extras";
 import { registerLive } from "./island/live";
 import { registerSystem } from "./island/system";
+import { registerVoice } from "./island/voice";
+import { registerLens } from "./island/lens";
 
 async function main() {
   const root = document.getElementById("root");
@@ -74,6 +77,8 @@ async function main() {
   registerExtras(island);
   registerLive(island);
   registerSystem(island);
+  registerVoice(island);
+  registerLens(island);
   registerIntegrationHandlers(island);
 
   island.launch();
@@ -88,7 +93,11 @@ async function main() {
     const params = new URLSearchParams(location.search);
     const feature = params.get("feature");
     const hud = params.get("hud");
-    if (import.meta.env.DEV && hud) {
+    const alive = params.get("alive");
+    if (import.meta.env.DEV && alive) {
+      const { runAliveDemo } = await import("../dev/alive-demo");
+      runAliveDemo(island, alive);
+    } else if (import.meta.env.DEV && hud) {
       const { demoSystem } = await import("./island/system");
       (window as unknown as { __island: Island; __state: typeof State }).__island = island;
       (window as unknown as { __state: typeof State }).__state = State;

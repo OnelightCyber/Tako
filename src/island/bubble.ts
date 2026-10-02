@@ -29,6 +29,14 @@ export function musicLive(): boolean {
 }
 
 export function liveKinds(): LiveKind[] {
+  const out = baseLiveKinds();
+  const preferred = State.livePreferred as LiveKind | null;
+  if (!preferred || out[0] === preferred || !out.includes(preferred)) return out;
+  if (out[0] === "session" && busySession()?.state === "approval") return out;
+  return [preferred, ...out.filter((k) => k !== preferred)];
+}
+
+export function baseLiveKinds(): LiveKind[] {
   const out: LiveKind[] = [];
   const session = busySession();
   if (session?.state === "approval") out.push("session");

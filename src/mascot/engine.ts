@@ -9,6 +9,8 @@ export type EyeShape =
 
 export type BadgeKind = "dots" | "bang" | "question" | "dot";
 
+export type VoiceMood = "off" | "listen" | "speak";
+
 export interface Badge {
   kind: BadgeKind;
   color: RGB;
@@ -196,6 +198,11 @@ export class BotEngine {
   private miniLookNextTime = 0;
 
   onDizzy: (() => void) | null = null;
+
+  voice: VoiceMood = "off";
+  voiceLevel = 0;
+  private beatSide = 1;
+  private lastBeat = 0;
 
   setState(next: BotStateName, force = false) {
     if (this.state === next && !force) return;
@@ -397,6 +404,42 @@ export class BotEngine {
     }
   }
 
+  beat(strength: number) {
+    const t = now();
+    if (this.isMini || t - this.lastBeat < 0.26 || this.state === "sleeping" || this.state === "dizzy") return;
+    if (this.locks.has("oy") || this.locks.has("roll") || this.morph > 0.05) return;
+    this.lastBeat = t;
+    const k = Math.min(1, Math.max(0.35, strength));
+    this.beatSide = -this.beatSide;
+    this.anim("oy", [[-0.13 * k, 85, Ease.out], [0, 190, Ease.inOut]]);
+    this.anim("sy", [[1 - 0.11 * k, 55, Ease.out], [1 + 0.07 * k, 110, Ease.out], [1, 150, Ease.inOut]]);
+    this.anim("sx", [[1 + 0.1 * k, 55, Ease.out], [1 - 0.05 * k, 110, Ease.out], [1, 150, Ease.inOut]]);
+    this.anim("tilt", [[0.1 * k * this.beatSide, 120, Ease.out], [0, 280, Ease.inOut]]);
+  }
+
+  celebrate() {
+    this.interruptGreet();
+    if (this.state === "dizzy") return;
+    const t = now();
+    this.eyeOverride = "star";
+    this.eyeOverrideUntil = t + 1.5;
+    this.anim("oy", [[-0.36, 150, Ease.out], [0.05, 210, Ease.inOut], [0, 190, Ease.back]]);
+    this.anim("sy", [[0.8, 80, Ease.out], [1.18, 150, Ease.out], [0.9, 170, Ease.inOut], [1, 210, Ease.back]]);
+    this.anim("sx", [[1.2, 80, Ease.out], [0.88, 150, Ease.out], [1.06, 170, Ease.inOut], [1, 210, Ease.back]]);
+    this.anim("blush", [[0.8, 200, Ease.out], [0.8, 900, Ease.lin], [0, 400, Ease.inOut]]);
+    this.emit("star", 4);
+    setTimeout(() => this.emit("spark", 5), 240);
+  }
+
+  stretch() {
+    const t = now();
+    this.eyeOverride = "tired";
+    this.eyeOverrideUntil = t + 0.75;
+    this.anim("sy", [[1.15, 380, Ease.inOut], [0.95, 260, Ease.inOut], [1, 240, Ease.back]]);
+    this.anim("sx", [[0.92, 380, Ease.inOut], [1.05, 260, Ease.inOut], [1, 240, Ease.back]]);
+    setTimeout(() => this.blink(), 800);
+  }
+
   emit(type: Particle["type"], count: number) {
     for (let i = 0; i < count; i++) {
       const isZ = type === "z";
@@ -430,7 +473,7 @@ export class BotEngine {
       this.tweens.size > 0 ||
       this.particles.length > 0 ||
       this.cfg.bounces || this.cfg.scans || this.cfg.breathes || this.cfg.zz || this.cfg.sweat ||
-      this.isMini ||
+      this.isMini || this.voice !== "off" ||
       Math.abs(this.tgYaw - this.yaw) > 0.002 ||
       Math.abs(this.tgPitch - this.pitch) > 0.002 ||
       Math.abs(this.tgTilt - this.tilt) > 0.002 ||
@@ -501,6 +544,10 @@ export class BotEngine {
     this.tgYaw = ty;
     this.tgPitch = tp;
     this.tgTilt = this.cfg.tilt;
+    if (this.voice === "listen") {
+      this.tgTilt = 0.14;
+      this.tgEs = 1 + Math.min(0.28, this.voiceLevel * 0.5);
+    }
 
     if (n > this.waveStart && n < this.waveUntil) {
       const wt = n - this.waveStart;
@@ -521,6 +568,11 @@ export class BotEngine {
     } else {
       this.tgSy = 1;
       this.tgSx = 1;
+    }
+
+    if (this.voice === "speak") {
+      this.tgSy = 1 + this.voiceLevel * 0.1;
+      this.tgSx = 1 - this.voiceLevel * 0.055;
     }
 
     if (this.isMini && n > this.miniNextBehavior) this.doMiniBehaviorLoop();

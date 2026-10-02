@@ -169,6 +169,12 @@ export interface Settings {
   weatherEnabled: boolean;
   weatherCity: string;
   visualizer: boolean;
+  voiceEnabled: boolean;
+  voiceReplies: boolean;
+  voiceApprovals: boolean;
+  lensEnabled: boolean;
+  mascotAlive: boolean;
+  calmMotion: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -224,7 +230,15 @@ export const DEFAULT_SETTINGS: Settings = {
   weatherEnabled: true,
   weatherCity: "",
   visualizer: true,
+  voiceEnabled: false,
+  voiceReplies: true,
+  voiceApprovals: false,
+  lensEnabled: true,
+  mascotAlive: true,
+  calmMotion: false,
 };
+
+export type VoicePhase = "idle" | "listening" | "thinking" | "speaking";
 
 export interface CallInfo {
   app: string;
@@ -288,6 +302,12 @@ class AppState {
   weather: WeatherInfo | null = null;
   download: DownloadInfo | null = null;
   downloadCount = 0;
+  voicePhase: VoicePhase = "idle";
+  voicePartial = "";
+  voiceAnswer = "";
+  voiceFailed = false;
+  missionDraft: string | null = null;
+  livePreferred: string | null = null;
   audioPeak = 0;
 
   integrations: Record<string, IntegrationInfo> = {};

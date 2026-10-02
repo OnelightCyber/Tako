@@ -74,6 +74,11 @@ export const PRO = {
   fog: "M5 9h14M3 13h18M5 17h14",
   trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
   calendar: "M4 5h16v16H4zM4 10h16M9 3v4M15 3v4",
+  mapPin: "M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  package: "M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8M7.5 5.5l9 5",
+  languages: "M4 5h9M8.5 3v2M6 5c.6 3.5 2.7 6.2 6 7.5M11 5c-.7 3.6-3.1 6.4-7 8M13 21l4-10 4 10M14.4 18h5.2",
+  clipboard: "M9 4h6v3H9zM9 5.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6.5a1 1 0 0 0-1-1h-3",
+  wand: "M15 4V2M15 10V8M11 6h2M17 6h2M4 20l10-10M13 3.5l1.5 1.5M16.5 7l1.5 1.5",
 } as const;
 
 export type ProIconName = keyof typeof PRO;

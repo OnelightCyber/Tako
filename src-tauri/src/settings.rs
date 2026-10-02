@@ -98,6 +98,18 @@ pub struct Settings {
     pub weather_city: String,
     #[serde(default = "default_true")]
     pub visualizer: bool,
+    #[serde(default)]
+    pub voice_enabled: bool,
+    #[serde(default = "default_true")]
+    pub voice_replies: bool,
+    #[serde(default)]
+    pub voice_approvals: bool,
+    #[serde(default = "default_true")]
+    pub lens_enabled: bool,
+    #[serde(default = "default_true")]
+    pub mascot_alive: bool,
+    #[serde(default)]
+    pub calm_motion: bool,
 }
 
 fn default_scale() -> f64 {
@@ -194,6 +206,12 @@ impl Default for Settings {
             weather_enabled: true,
             weather_city: String::new(),
             visualizer: true,
+            voice_enabled: false,
+            voice_replies: true,
+            voice_approvals: false,
+            lens_enabled: true,
+            mascot_alive: true,
+            calm_motion: false,
         }
     }
 }

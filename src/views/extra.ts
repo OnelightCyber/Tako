@@ -466,7 +466,13 @@ export function buildMission(actions: ViewActions): ViewHost {
       if (State.view === "mission") fit("mission", el, body);
     },
     focus() {
+      if (State.missionDraft) {
+        input.value = State.missionDraft;
+        State.missionDraft = null;
+        setStatus("Vérifie la mission et le dossier, puis lance-la.");
+      }
       input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
     },
   };
 }

@@ -7,6 +7,8 @@ import { bytes, initials, middle, toneFor, type HudSpec } from "../core/hud";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
+import { testLens } from "./lens";
+import { listen } from "./voice";
 
 const CALL_APPS = new Set(["discord", "teams", "zoom", "skype", "slack", "whatsapp", "telegram", "signal", "messenger", "webex", "facetime", "google meet"]);
 const MAX_NOTICES = 30;
@@ -235,6 +237,19 @@ function sampleSpec(kind: string): HudSpec | null {
 export function testHud(island: Island, kind: string) {
   if (kind === "call") {
     testCall(island);
+    return;
+  }
+  if (kind.startsWith("lens-")) {
+    testLens(island, kind.slice(5));
+    return;
+  }
+  if (kind === "voice") {
+    listen();
+    return;
+  }
+  if (kind === "celebrate") {
+    island.reveal();
+    window.setTimeout(() => island.celebrate(), 350);
     return;
   }
   const spec = sampleSpec(kind);

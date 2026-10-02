@@ -3,6 +3,7 @@ mod bluetooth;
 mod browser;
 mod claude;
 mod claude_cli;
+mod clipboard;
 mod downloads;
 mod drives;
 mod files;
@@ -25,6 +26,7 @@ mod sysstats;
 mod tray;
 mod updater;
 mod usage;
+mod voice;
 mod vpn;
 mod weather;
 mod widget;
@@ -128,6 +130,8 @@ fn apply_features(app: &AppHandle, settings: &Settings) {
     network::set_enabled(settings.network_alerts);
     notify::configure(settings.notifications_enabled, settings.notifications_private, &settings.notifications_muted);
     weather::configure(settings.weather_enabled, &settings.weather_city);
+    voice::set_enabled(settings.voice_enabled);
+    clipboard::set_enabled(settings.lens_enabled);
     register_hotkey(app, &settings.mission_hotkey);
 }
 
@@ -162,6 +166,16 @@ fn weather_failure() -> Option<String> {
 }
 
 #[tauri::command]
+fn voice_listen() {
+    voice::listen();
+}
+
+#[tauri::command]
+async fn voice_say(text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || voice::say(&text)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn drive_open(letter: String) -> bool {
     drives::open(&letter)
 }
@@ -183,7 +197,10 @@ fn notification_open(app_id: String) -> bool {
 
 #[tauri::command]
 fn hud_test(app: AppHandle, kind: String) {
-    const KINDS: &[&str] = &["volume", "caps", "charging", "battery", "drive", "network", "download", "notification", "call"];
+    const KINDS: &[&str] = &[
+        "volume", "caps", "charging", "battery", "drive", "network", "download", "notification", "call",
+        "lens-error", "lens-english", "lens-tracking", "lens-address", "voice", "celebrate",
+    ];
     if KINDS.contains(&kind.as_str()) {
         let _ = app.emit_to(island::WINDOW_LABEL, "hud-test", kind);
     }
@@ -771,6 +788,8 @@ pub fn run() {
             weather_now,
             weather_refresh,
             weather_failure,
+            voice_listen,
+            voice_say,
             drive_open,
             download_open,
             download_reveal,
@@ -851,6 +870,8 @@ pub fn run() {
             network::start(handle.clone());
             notify::start(handle.clone());
             weather::start(handle.clone());
+            voice::start(handle.clone());
+            clipboard::start(handle.clone());
             apply_features(&handle, &loaded);
             Ok(())
         })
