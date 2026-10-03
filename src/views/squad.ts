@@ -318,8 +318,8 @@ export function buildSquad(actions: ViewActions): ViewHost {
       if (State.view === "squad") {
         const box = islandBox(el);
         if (box) {
-          const natural = contentHeight(body) - grid.offsetHeight + grid.scrollHeight;
-          setSizeHint("squad", 0, box.h - body.clientHeight + natural + 4);
+          const natural = contentHeight(body) - grid.offsetHeight + contentHeight(grid);
+          setSizeHint("squad", 0, box.h - body.clientHeight + natural);
         }
       }
     },

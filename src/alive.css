@@ -84,26 +84,51 @@
   opacity: 0;
 }
 
-.view {
-  filter: blur(5px);
-  transition:
-    opacity 0.16s ease-in,
-    filter 0.16s ease-in;
+.view.on {
+  animation: view-in 0.48s ease-out;
 }
 
-.view.on {
-  filter: none;
-  transition:
-    opacity 0.3s ease-out 0.16s,
-    transform 0.3s cubic-bezier(0.3, 1.2, 0.4, 1) 0.16s,
-    filter 0.32s ease-out 0.16s;
+.view.parked {
+  display: none;
+}
+
+#content.parked {
+  content-visibility: hidden;
+}
+
+#media-strip:not(.on) *,
+#island.has-hud #media-strip * {
+  animation: none !important;
+}
+
+@keyframes view-in {
+  0%,
+  33% {
+    opacity: 0;
+    transform: scale(0.97);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes view-fade {
+  from {
+    opacity: 0;
+  }
 }
 
 .calm .view,
 .calm .view.on {
-  filter: none;
   transform: none;
   transition: opacity 0.18s ease;
+}
+
+.calm .view.on {
+  animation: view-fade 0.22s ease-out;
 }
 
 .calm #island,

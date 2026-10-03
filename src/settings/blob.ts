@@ -5,9 +5,20 @@ const ticks = new Set<(dt: number) => void>();
 let mouse = { x: -9999, y: -9999 };
 let running = false;
 let last = 0;
+let drawn = 0;
+let moved = performance.now();
+
+const FRAME_MS = 1000 / 30;
+const IDLE_MS = 8000;
 
 window.addEventListener("mousemove", (e) => {
   mouse = { x: e.clientX, y: e.clientY };
+  moved = performance.now();
+  start();
+});
+
+window.addEventListener("focus", () => {
+  moved = performance.now();
   start();
 });
 
@@ -19,11 +30,15 @@ function start() {
 }
 
 function frame(now: number) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  for (const tick of ticks) tick(dt);
-  for (const draw of live) draw();
-  if (live.size > 0 && document.visibilityState === "visible") requestAnimationFrame(frame);
+  if (now - drawn >= FRAME_MS - 1) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    drawn = now;
+    for (const tick of ticks) tick(dt);
+    for (const draw of live) draw();
+  }
+  const awake = live.size > 0 && document.visibilityState === "visible" && document.hasFocus() && now - moved < IDLE_MS;
+  if (awake) requestAnimationFrame(frame);
   else running = false;
 }
 

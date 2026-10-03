@@ -127,6 +127,9 @@ export class Island {
   private artKey = "";
   private dotsKey = "";
   private trailKey = "";
+  private lookKey = "";
+  private parkTimers = new Map<HTMLElement, number>();
+  private geo = { w: -1, h: -1, r: -1, t: "" };
   private glanceKey = "";
 
   constructor(root: HTMLElement) {
@@ -705,12 +708,26 @@ export class Island {
     const w = this.width.value;
     const hh = this.height.value;
     const r = this.radius.value;
-    this.islandEl.style.width = `${w}px`;
-    this.islandEl.style.height = `${hh}px`;
-    this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
     const jx = this.jellyX.value;
     const jy = this.jellyY.value;
-    this.islandEl.style.transform = jx || jy ? `scale(${(1 + jx).toFixed(4)}, ${(1 + jy).toFixed(4)})` : "";
+    const transform = jx || jy ? `scale(${(1 + jx).toFixed(4)}, ${(1 + jy).toFixed(4)})` : "";
+    const g = this.geo;
+    if (Math.abs(g.w - w) > 0.05) {
+      g.w = w;
+      this.islandEl.style.width = `${w}px`;
+    }
+    if (Math.abs(g.h - hh) > 0.05) {
+      g.h = hh;
+      this.islandEl.style.height = `${hh}px`;
+    }
+    if (Math.abs(g.r - r) > 0.05) {
+      g.r = r;
+      this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
+    }
+    if (g.t !== transform) {
+      g.t = transform;
+      this.islandEl.style.transform = transform;
+    }
 
     this.miniGrid.style.left = `${w - 40 - 14.5}px`;
     this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
@@ -898,6 +915,7 @@ export class Island {
     this.wasInIsland = inIsland;
 
     const overBot = State.mode === "expanded" && State.stateOverride == null && this.isBotHit(x, y);
+    const hoverChanged = overBot !== this.botHovering;
     if (overBot && !this.botHovering) this.botHoverIn(x, y);
     if (!overBot && this.botHovering) this.cancelBotHover();
     this.botHovering = overBot;
@@ -909,7 +927,10 @@ export class Island {
       }
     }
 
-    this.ensureRunning();
+    const look = `${this.lookX()}:${this.lookY()}`;
+    const lookChanged = look !== this.lookKey;
+    this.lookKey = look;
+    if (State.mode !== "hidden" && (lookChanged || hoverChanged || UploadSeq.isActive)) this.ensureRunning();
   }
 
   private isBotHit(x: number, y: number): boolean {
@@ -974,6 +995,11 @@ export class Island {
   }
 
   private frame = (nowMs: number) => {
+    const moving = this.width.animating || this.height.animating || this.radius.animating || this.jellyMoving;
+    if (nowMs - this.lastFrame < (moving ? 1000 / 121 : 1000 / 61)) {
+      requestAnimationFrame(this.frame);
+      return;
+    }
     const dt = Math.max(0, Math.min(0.05, (nowMs - this.lastFrame) / 1000));
     this.lastFrame = nowMs;
 
@@ -1012,7 +1038,8 @@ export class Island {
     this.viewsEl.classList.toggle("hidden-by-upload", uploadActive);
 
     tickMiniBots(dt);
-    this.views.get(State.view)?.tick?.(nowMs);
+    const shown = State.mode === "expanded";
+    if (shown) this.views.get(State.view)?.tick?.(nowMs);
     if (UploadSeq.isActive) this.stepSequence();
     this.updateCountdown(nowMs);
 
@@ -1025,7 +1052,7 @@ export class Island {
       : settling || this.dirty ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled || this.jellyMoving ||
         greetingActive || this.engine.busy || UploadSeq.isActive || this.live.animating ||
-        this.views.get(State.view)?.animating?.() === true;
+        (shown && this.views.get(State.view)?.animating?.() === true);
 
     if (busy) {
       requestAnimationFrame(this.frame);
@@ -1138,14 +1165,31 @@ export class Island {
     return dpr;
   }
 
+  private park(el: HTMLElement, away: boolean) {
+    const timer = this.parkTimers.get(el);
+    if (!away) {
+      if (timer != null) window.clearTimeout(timer);
+      this.parkTimers.delete(el);
+      el.classList.remove("parked");
+      return;
+    }
+    if (el.classList.contains("parked") || timer != null) return;
+    this.parkTimers.set(el, window.setTimeout(() => {
+      this.parkTimers.delete(el);
+      el.classList.add("parked");
+    }, 450));
+  }
+
   private lookX(): number {
     const rect = this.islandRect();
     const botScreenX = rect.x + this.botCx.value;
-    return Math.tanh((State.mouse.x - botScreenX) / 260);
+    const step = State.mode === "expanded" ? 40 : 12;
+    return Math.round(Math.tanh((State.mouse.x - botScreenX) / 260) * step) / step;
   }
 
   private lookY(): number {
-    return -Math.tanh((State.mouse.y - this.botCy.value) / 200);
+    const step = State.mode === "expanded" ? 40 : 12;
+    return Math.round(-Math.tanh((State.mouse.y - this.botCy.value) / 200) * step) / step;
   }
 
   private updateCountdown(nowMs: number) {
@@ -1182,9 +1226,11 @@ export class Island {
     this.greetingCanvas.style.display = greetingActive ? "block" : "none";
 
     this.header.sync();
+    this.park(this.contentEl, !(expanded && !greetingActive));
     for (const [name, view] of this.views) {
       const on = name === State.view;
       view.el.classList.toggle("on", on);
+      this.park(view.el, !on);
       if (on) view.sync();
     }
 

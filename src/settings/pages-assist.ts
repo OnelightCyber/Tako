@@ -61,6 +61,7 @@ function drawVoice(s: TtsStatus | null, error: string | null = null) {
     void Bridge.voiceSay(SAMPLE).then((url) => {
       sample?.pause();
       sample = new Audio(url);
+      sample.volume = 0.7;
       void sample.play();
     }).catch(() => undefined).finally(() => {
       listen.disabled = false;

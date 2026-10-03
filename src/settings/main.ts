@@ -21,6 +21,10 @@ interface SearchEntry {
 }
 
 const root = document.getElementById("settings-root")!;
+const doze = () => document.documentElement.classList.toggle("asleep", !document.hasFocus());
+window.addEventListener("focus", doze);
+window.addEventListener("blur", doze);
+doze();
 const pageHost = h("main", { class: "content" });
 const navHost = h("nav", { class: "nav-items" });
 const footHost = h("div", { class: "nav-foot" });

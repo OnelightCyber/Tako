@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -216,45 +216,52 @@ pub fn synthesize(id: &str, text: &str) -> Result<Vec<u8>, String> {
 
 fn run(v: &Voice, text: &str) -> Result<Vec<u8>, String> {
     let line = text.replace(['\r', '\n'], " ");
+    let out = root().join(format!("speech-{}.wav", std::process::id()));
+    let _ = std::fs::remove_file(&out);
     let mut child = Command::new(exe())
         .arg("--model")
         .arg(voices_dir().join(v.files[0].file))
         .arg("--speaker")
         .arg(v.speaker.to_string())
         .arg("--output_file")
-        .arg("-")
+        .arg(&out)
         .arg("--quiet")
         .current_dir(exe().parent().unwrap_or(&root()))
         .creation_flags(NO_WINDOW)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
     }
-    let mut stdout = child.stdout.take().ok_or("stdout")?;
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes);
-        bytes
-    });
     let started = Instant::now();
-    loop {
+    let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            let bytes = reader.join().map_err(|_| "reader")?;
-            if !status.success() || bytes.len() < 1000 || &bytes[..4] != b"RIFF" {
-                return Err("piper".into());
-            }
-            return Ok(bytes);
+            break status;
         }
         if started.elapsed() > TIMEOUT {
             let _ = child.kill();
+            let _ = std::fs::remove_file(&out);
             return Err("timeout".into());
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(Duration::from_millis(15));
+    };
+    let bytes = std::fs::read(&out).unwrap_or_default();
+    let _ = std::fs::remove_file(&out);
+    if !status.success() || !valid_wav(&bytes) {
+        return Err("piper".into());
     }
+    Ok(bytes)
+}
+
+pub fn valid_wav(bytes: &[u8]) -> bool {
+    if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return false;
+    }
+    let declared = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    declared + 8 == bytes.len()
 }
 
 #[cfg(test)]
@@ -272,11 +279,36 @@ mod tests {
     }
 
     #[test]
+    fn wav_files_must_match_their_header() {
+        let mut wav = b"RIFF".to_vec();
+        wav.extend(40u32.to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.resize(48, 0);
+        assert!(valid_wav(&wav));
+        let mut stretched = wav.clone();
+        stretched.insert(30, b'\r');
+        assert!(!valid_wav(&stretched));
+        assert!(!valid_wav(b"RIFF"));
+    }
+
+    #[test]
     #[ignore]
-    fn live_piper_speaks_french() {
-        let started = Instant::now();
-        let wav = synthesize("siwis", "Bonjour, je suis Tako.").expect("piper");
-        println!("{:?}, {} bytes", started.elapsed(), wav.len());
-        assert_eq!(&wav[..4], b"RIFF");
+    fn live_piper_round_trips_through_whisper() {
+        let wav = synthesize("siwis", "Bonjour, je suis Tako, ton assistant. Il est onze heures.").expect("piper");
+        let mut i = 12;
+        let mut samples = Vec::new();
+        while i + 8 <= wav.len() {
+            let size = u32::from_le_bytes([wav[i + 4], wav[i + 5], wav[i + 6], wav[i + 7]]) as usize;
+            if &wav[i..i + 4] == b"data" {
+                samples = wav[i + 8..(i + 8 + size).min(wav.len())].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect();
+                break;
+            }
+            i += 8 + size + (size & 1);
+        }
+        let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let audio = crate::mic::to_mono_16k(&samples, 1, 22_050);
+        let text = crate::stt::transcribe(&audio, Some("fr")).expect("whisper");
+        println!("peak {peak:.2} -> {text}");
+        assert!(text.to_lowercase().contains("tako") || text.to_lowercase().contains("bonjour"));
     }
 }

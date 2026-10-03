@@ -1846,3 +1846,9 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.asleep *,
+.asleep *::before,
+.asleep *::after {
+  animation-play-state: paused !important;
+}

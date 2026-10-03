@@ -15,6 +15,7 @@ const WORDS: Record<string, number> = {
   onze: 11, douze: 12, quinze: 15, vingt: 20, "vingt-cinq": 25, trente: 30, quarante: 40, "quarante-cinq": 45, cinquante: 50, soixante: 60,
 };
 const APPROVAL_DELAY_MS = 1200;
+const SPEECH_GAIN = 0.7;
 
 interface Local {
   say: string;
@@ -253,8 +254,11 @@ async function play(url: string, token: number): Promise<void> {
   node.buffer = buffer;
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
+  const gain = ctx.createGain();
+  gain.gain.value = SPEECH_GAIN;
   node.connect(analyser);
-  analyser.connect(ctx.destination);
+  analyser.connect(gain);
+  gain.connect(ctx.destination);
   source = node;
   const samples = new Uint8Array(analyser.fftSize);
   let running = true;
