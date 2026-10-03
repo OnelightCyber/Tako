@@ -21,6 +21,8 @@ export class IslandStateMachine {
 
   hold: (() => boolean) | null = null;
 
+  homeHold: (() => boolean) | null = null;
+
   private petitHide: number | null = null;
   private homeCollapse: number | null = null;
   private greetCollapse: number | null = null;
@@ -143,8 +145,19 @@ export class IslandStateMachine {
     if (this.pinned) return;
     this.homeCollapse = window.setTimeout(() => {
       this.homeCollapse = null;
-      if (this.state === "home") this.transition("petit");
+      if (this.state !== "home") return;
+      if (this.homeHold?.()) this.waitHomeHold();
+      else this.transition("petit");
     }, this.homeToPetitDelay * 1000);
+  }
+
+  private waitHomeHold() {
+    this.homeCollapse = window.setTimeout(() => {
+      this.homeCollapse = null;
+      if (this.state !== "home") return;
+      if (this.homeHold?.()) this.waitHomeHold();
+      else this.scheduleHomeCollapse();
+    }, 1500);
   }
 
   private scheduleGreetCollapse(delay: number) {

@@ -24,7 +24,7 @@ function drawModel(s: SttStatus | null, error: string | null = null) {
     host.append(h("div", { class: "stt-bar" }, h("i", { style: `width:${pct}%` })), h("span", { class: "stt-pct", text: `${pct} %` }));
     return;
   }
-  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : "Échec, réessaie" }));
+  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : error === "stalled" ? "Téléchargement bloqué, réessaie" : "Échec, réessaie" }));
   host.append(button("Télécharger · 190 Mo", "primary", () => {
     void Bridge.sttDownload();
     window.setTimeout(refreshModel, 500);
@@ -46,6 +46,16 @@ const SAMPLE = "Bonjour, je suis Tako. Je te lis les réponses de Claude, et je 
 let voiceHost: HTMLElement | null = null;
 let voiceListening = false;
 let sample: HTMLAudioElement | null = null;
+let sampleUrl: string | null = null;
+
+function blobUrl(dataUrl: string): string {
+  const comma = dataUrl.indexOf(",");
+  const type = /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? "audio/wav";
+  const raw = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type }));
+}
 
 function voiceSize(total: number): string {
   return `${Math.max(1, Math.round(total / 1_000_000))} Mo`;
@@ -60,9 +70,11 @@ function drawVoice(s: TtsStatus | null, error: string | null = null) {
     listen.disabled = true;
     void Bridge.voiceSay(SAMPLE).then((url) => {
       sample?.pause();
-      sample = new Audio(url);
+      if (sampleUrl) URL.revokeObjectURL(sampleUrl);
+      sampleUrl = blobUrl(url);
+      sample = new Audio(sampleUrl);
       sample.volume = 0.7;
-      void sample.play();
+      return sample.play();
     }).catch(() => undefined).finally(() => {
       listen.disabled = false;
     });
@@ -77,7 +89,7 @@ function drawVoice(s: TtsStatus | null, error: string | null = null) {
     host.append(h("div", { class: "stt-bar" }, h("i", { style: `width:${pct}%` })), h("span", { class: "stt-pct", text: `${pct} %` }));
     return;
   }
-  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : "Échec, réessaie" }));
+  if (error) host.append(h("span", { class: "muted small", text: error === "offline" ? "Pas de connexion" : error === "stalled" ? "Téléchargement bloqué, réessaie" : "Échec, réessaie" }));
   host.append(button(`Télécharger · ${voiceSize(s.total)}`, "primary", () => {
     void Bridge.ttsDownload(name);
     window.setTimeout(refreshVoice, 500);
@@ -145,11 +157,16 @@ export function voicePage(): Node[] {
   const on = c.settings.voiceEnabled;
   const listenNow = testButton(() => void Bridge.hudTest("voice"), "Essayer");
   listenNow.disabled = !on;
+  const approvals = toggle(c.settings.voiceApprovals, (v) => set("voiceApprovals", v), !on);
   return [
     pageHead("mic", "orange", "Assistant vocal", "Tako en mode Jarvis : tu lui parles, Claude te répond à voix haute."),
     group({ title: "Écoute", icon: "mic", tone: "orange", note: "Tout se passe sur ton PC : Windows guette « Hey Tako », puis Whisper transcrit ta question. Ta voix ne quitte jamais l'ordinateur, seule ta question écrite part vers Claude. Pendant un appel ou en mode jeu, Tako n'écoute pas les commandes." },
       row({ icon: "mic", tone: "orange", title: "Réveil « Hey Tako »", desc: "Dis « Hey Tako », l'îlot s'ouvre et le personnage t'écoute. Tu peux aussi cliquer sur le micro dans l'îlot.", keywords: "jarvis voix micro parler hey ok salut",
-        control: inline(listenNow, toggle(on, (v) => set("voiceEnabled", v, v ? "Tako t'écoute" : "Écoute coupée"))) }),
+        control: inline(listenNow, toggle(on, (v) => {
+          listenNow.disabled = !v;
+          approvals.disabled = !v;
+          set("voiceEnabled", v, v ? "Tako t'écoute" : "Écoute coupée");
+        })) }),
       row({ icon: "sparkles", tone: "purple", title: "Reconnaissance vocale", desc: "Whisper, en local et en français. Le modèle (190 Mo) se télécharge une seule fois, quand tu actives l'écoute.", keywords: "whisper modèle dictée transcription hors ligne",
         control: modelControl() }),
       row({ icon: "speaker", tone: "green", title: "Répondre à voix haute", desc: "Sinon la réponse s'affiche seulement.", keywords: "synthèse vocale parole lecture",
@@ -157,7 +174,7 @@ export function voicePage(): Node[] {
       row({ icon: "music", tone: "pink", title: "Voix de Tako", desc: "Des voix naturelles (Piper) qui tournent sur ton PC, téléchargées une seule fois. La voix de Windows reste disponible, en plus robotique.", keywords: "voix naturelle piper siwis pierre jessica synthèse",
         control: voiceControl(), wide: true }),
       row({ icon: "shieldCheck", tone: "amber", title: "Valider les permissions à la voix", desc: "« Tako, oui » autorise et « Tako, non » refuse la demande affichée. Un « oui » n'est accepté que si Tako est sûr de l'avoir entendu.", keywords: "approbation autoriser refuser permission oui non",
-        control: toggle(c.settings.voiceApprovals, (v) => set("voiceApprovals", v), !on) }),
+        control: approvals }),
     ),
     group({ title: "Ce que tu peux dire", icon: "message", tone: "blue" },
       h("div", { class: "keys" },
@@ -176,8 +193,20 @@ export function voicePage(): Node[] {
   ];
 }
 
+const POLICY: Record<string, string> = {
+  safe: "Prudent : Claude modifie les fichiers de sa copie, lance les tests et les builds, tout le reste est refusé sans attendre. Un test ou un script de build peut exécuter du code : garde ce mode pour tes propres projets.",
+  auto: "Mode auto de Claude : son classifieur décide. Ce qu'il juge risqué est refusé et la tâche continue sans.",
+};
+
 export function squadPage(): Node[] {
   const c = app.ctx;
+  let policyDesc: Element | null = null;
+  const policyRow = row({ icon: "shieldCheck", tone: "green", title: "Prudence", desc: POLICY[c.settings.nightPolicy] ?? POLICY.safe, keywords: "permissions sécurité dontAsk auto",
+    control: segmented([{ value: "safe", label: "Prudent" }, { value: "auto", label: "Mode auto" }], c.settings.nightPolicy, (v) => {
+      set("nightPolicy", v);
+      if (policyDesc) policyDesc.textContent = POLICY[v] ?? POLICY.safe;
+    }) });
+  policyDesc = policyRow.querySelector(".row-desc");
   const hours = [22, 23, 0, 1, 2, 3].map((n) => ({ value: String(n), label: `${n} h` }));
   return [
     pageHead("rocket", "indigo", "Mission Control", "Plusieurs Claude en même temps, et une équipe de nuit qui avance pendant que tu dors."),
@@ -188,9 +217,8 @@ export function squadPage(): Node[] {
     group({ title: "Équipe de nuit", icon: "moon", tone: "purple", note: "Dans Mission Control, choisis « Cette nuit » avant d'ajouter une tâche. Au réveil, Tako te dit ce qui est prêt à fusionner et ce qui a bloqué." },
       row({ icon: "clock", tone: "purple", title: "Début de la nuit", desc: "Les tâches démarrent à cette heure-là, jusqu'à 7 h.", keywords: "heure nuit planifier",
         control: dropdown(hours, String(c.settings.nightHour), (v) => set("nightHour", Number(v))) }),
-      row({ icon: "shieldCheck", tone: "green", title: "Prudence", desc: c.settings.nightPolicy === "auto" ? "Mode auto de Claude : son classifieur décide, ce qu'il refuse attend le matin." : "Prudent : modifications de fichiers, tests, builds et git en lecture. Tout le reste est refusé sans attendre.", keywords: "permissions sécurité dontAsk auto",
-        control: segmented([{ value: "safe", label: "Prudent" }, { value: "auto", label: "Mode auto" }], c.settings.nightPolicy, (v) => set("nightPolicy", v)) }),
-      row({ icon: "bolt", tone: "amber", title: "Garder le PC éveillé", desc: "Empêche la mise en veille tant que l'équipe de nuit travaille (l'écran peut s'éteindre).", keywords: "veille sommeil",
+      policyRow,
+      row({ icon: "bolt", tone: "amber", title: "Garder le PC éveillé", desc: "Dès qu'une tâche est prévue pour la nuit, le PC ne se met plus en veille jusqu'à ce que l'équipe ait fini (l'écran peut s'éteindre).", keywords: "veille sommeil",
         control: toggle(c.settings.nightKeepAwake, (v) => set("nightKeepAwake", v)) }),
       row({ icon: "speaker", tone: "pink", title: "Briefing du matin à voix haute", desc: "Quand tu reviens, Tako lit le rapport de la nuit (avec l'assistant vocal activé).", keywords: "rapport matin voix",
         control: toggle(c.settings.nightBriefing, (v) => set("nightBriefing", v)) }),

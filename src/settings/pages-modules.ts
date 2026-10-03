@@ -87,6 +87,7 @@ export function notificationsPage(): Node[] {
 export function systemPage(): Node[] {
   const c = app.ctx;
   const weatherState = h("div", { class: "wx-state" });
+  let tries = 0;
   const drawWeather = async () => {
     clear(weatherState);
     const w = await Bridge.weatherNow();
@@ -99,14 +100,21 @@ export function systemPage(): Node[] {
       weatherState.append(h("span", { class: "muted small", text: `Ville introuvable : « ${c.settings.weatherCity} ». Essaie avec son nom complet.` }));
     } else if (failed === "offline") {
       weatherState.append(h("span", { class: "muted small", text: "Open-Meteo ne répond pas pour l'instant. Tako réessaiera tout seul." }));
+    } else if (!c.settings.weatherEnabled) {
+      weatherState.append(h("span", { class: "muted small", text: "La météo est désactivée." }));
     } else {
       weatherState.append(h("span", { class: "muted small", text: "Recherche de la météo…" }));
-      window.setTimeout(() => {
-        if (weatherState.isConnected) void drawWeather();
-      }, 2500);
+      if (tries++ < 24) {
+        window.setTimeout(() => {
+          if (weatherState.isConnected) void drawWeather();
+        }, 2500);
+      }
     }
   };
-  whenShown(weatherState, () => void drawWeather());
+  whenShown(weatherState, () => {
+    tries = 0;
+    void drawWeather();
+  });
   const city = field({
     value: c.settings.weatherCity, placeholder: "Paris, Lyon, Montréal…", button: "OK",
     onSubmit: (v) => {

@@ -7,6 +7,8 @@ interface MiniBot {
   cssSize: number;
   taskId: string;
   dpr: number;
+  shown: boolean;
+  checkedAt: number;
 }
 
 const live = new Map<HTMLCanvasElement, MiniBot>();
@@ -37,7 +39,7 @@ export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
     engine.eyeOverrideUntil = Number.POSITIVE_INFINITY;
   }
 
-  live.set(canvas, { canvas, engine, cssSize: engineSize, taskId: task.id, dpr });
+  live.set(canvas, { canvas, engine, cssSize: engineSize, taskId: task.id, dpr, shown: true, checkedAt: 0 });
   return slot;
 }
 
@@ -62,7 +64,17 @@ export function syncMiniBotStates(tasks: AgentTask[]) {
 
 export function tickMiniBots(dt: number) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const now = performance.now();
   for (const mb of live.values()) {
+    if (!mb.canvas.isConnected) {
+      live.delete(mb.canvas);
+      continue;
+    }
+    if (now - mb.checkedAt > 300) {
+      mb.checkedAt = now;
+      mb.shown = mb.canvas.checkVisibility();
+    }
+    if (!mb.shown) continue;
     if (mb.dpr !== dpr) {
       mb.dpr = dpr;
       mb.canvas.width = Math.round(mb.cssSize * dpr);

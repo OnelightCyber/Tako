@@ -320,6 +320,7 @@ class AppState {
   voicePartial = "";
   voiceAnswer = "";
   voiceFailed = false;
+  voiceHint = "";
   missionDraft: string | null = null;
   squad: SquadJob[] = [];
   squadReport: SquadReport | null = null;
@@ -349,11 +350,26 @@ class AppState {
     return this.tasks.filter((t) => !!t.sessionId);
   }
 
+  isSquadTask(t: AgentTask): boolean {
+    if (t.origin === "squad") return true;
+    const norm = (p: string) => p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+    const cwd = t.sessionCwd ? norm(t.sessionCwd) : "";
+    if (!cwd) return false;
+    return this.squad.some((j) => {
+      const w = norm(j.worktree);
+      return cwd === w || cwd.startsWith(`${w}\\`);
+    });
+  }
+
+  get ownSessions(): AgentTask[] {
+    return this.sessions.filter((t) => !this.isSquadTask(t));
+  }
+
   get focusTask(): AgentTask | null {
     const found = this.tasks.find((t) => t.id === this.focusId);
-    if (found && !(found.id === PLACEHOLDER_ID && this.sessions.length > 0)) return found;
-    const recent = [...this.sessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
-    return recent ?? this.tasks[0] ?? null;
+    if (found && !(found.id === PLACEHOLDER_ID && this.ownSessions.length > 0)) return found;
+    const recent = [...this.ownSessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
+    return recent ?? this.tasks.find((t) => !t.sessionId || !this.isSquadTask(t)) ?? this.tasks[0] ?? null;
   }
 
   get effectiveState(): BotStateName {

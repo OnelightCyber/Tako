@@ -19,7 +19,7 @@ const CALL_COLOR = "#34D399";
 const DOWNLOAD_COLOR = "#38BDF8";
 
 export function busySession(): AgentTask | null {
-  const busy = State.sessions.filter((t) => BUSY.has(t.state));
+  const busy = State.ownSessions.filter((t) => BUSY.has(t.state));
   busy.sort((a, b) => (a.state === "approval" ? -1 : 0) - (b.state === "approval" ? -1 : 0) || (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0));
   return busy[0] ?? null;
 }

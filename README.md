@@ -441,9 +441,10 @@ npm run tauri dev       # the whole app, hot reload
 npm run dev             # just the interface, in a browser
 ```
 
-- **Building**: Whisper is compiled from source, so you need CMake and libclang. Install LLVM
-  (`winget install LLVM.LLVM`) or drop `libclang.dll` into `tools/libclang/`; `.cargo/config.toml` turns on the
-  `/O2` optimisations that cmake-rs leaves out with MSVC.
+- **Building**: Whisper is compiled from source, so you need CMake and libclang. Either drop `libclang.dll` into
+  `tools/libclang/`, or install LLVM (`winget install LLVM.LLVM`) and set `LIBCLANG_PATH` to its `bin` folder
+  (for example `C:\Program Files\LLVM\bin`), which overrides the default in `.cargo/config.toml`. That file also
+  turns on the `/O2` optimisations that cmake-rs leaves out with MSVC.
 - **Island demos**: <http://127.0.0.1:1420/?alive=glance> (also `session`, `lens-error`, `lens-address`,
   `lens-tracking`, `lens-english`, `voice-listen`, `voice-think`, `voice-answer`, `voice-fail`).
 - **Live view demo**: `npm run dev`, then <http://127.0.0.1:1420/?demo> (add `&until=plan|read|edit|diff|shell` to

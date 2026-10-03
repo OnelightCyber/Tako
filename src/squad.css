@@ -284,6 +284,12 @@
   color: #ff8d97;
 }
 
+.sq-act.confirm {
+  border-color: rgba(244, 80, 94, 0.5);
+  background: rgba(244, 80, 94, 0.2);
+  color: #ff8d97;
+}
+
 .sq-foot {
   display: flex;
   align-items: center;

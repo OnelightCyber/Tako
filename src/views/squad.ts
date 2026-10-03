@@ -3,7 +3,7 @@ import { baseName } from "../core/activity";
 import { colorForProject, type BotStateName } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State, type AgentTask } from "../core/state";
-import { createMiniBot, pruneMiniBots } from "../mascot/minibots";
+import { createMiniBot, pruneMiniBots, syncMiniBotStates } from "../mascot/minibots";
 import { h, clear } from "./dom";
 import { contentHeight, islandBox, setSizeHint } from "./fit";
 import { proIcon, type ProIconName } from "./pro-icons";
@@ -88,6 +88,41 @@ function act(icon: ProIconName, title: string, run: () => void, kind = ""): HTML
   return b;
 }
 
+const CONFIRM_MS = 3000;
+
+function sure(icon: ProIconName, title: string, run: () => void, kind = ""): HTMLElement {
+  const label = h("span", { text: title });
+  const b = h("button", { class: `sq-act ${kind}`.trim(), title }, proIcon(icon, 12, 2.2), label);
+  let armed: number | null = null;
+  const disarm = () => {
+    if (armed != null) window.clearTimeout(armed);
+    armed = null;
+    label.textContent = title;
+    b.classList.remove("confirm");
+  };
+  b.addEventListener("mousedown", (e) => e.stopPropagation());
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (armed == null) {
+      label.textContent = "Sûr ?";
+      b.classList.add("confirm");
+      armed = window.setTimeout(disarm, CONFIRM_MS);
+      return;
+    }
+    disarm();
+    run();
+  });
+  return b;
+}
+
+interface Card {
+  el: HTMLElement;
+  shape: string;
+  update(job: SquadJob): void;
+}
+
+const shapeOf = (job: SquadJob) => `${job.status}:${job.night ? 1 : 0}`;
+
 export function buildSquad(actions: ViewActions): ViewHost {
   const input = h("input", { class: "chat-input", type: "text", placeholder: "Décris une tâche : un Claude s'en occupe dans sa propre copie du projet…", maxlength: "4000" }) as HTMLInputElement;
   const go = h("button", { class: "send-btn", title: "Lancer" }, proIcon("rocket", 14, 2));
@@ -112,7 +147,10 @@ export function buildSquad(actions: ViewActions): ViewHost {
   let atNight = false;
   let busy = false;
   let chipKey = "";
-  let gridKey = "init";
+  const cards = new Map<string, Card>();
+  const empty = h("div", { class: "sq-empty" },
+    h("b", { text: "Plusieurs Claude, en même temps." }),
+    h("span", { text: "Chacun travaille dans sa propre copie du projet (un worktree git) : rien ne touche ton dossier tant que tu n'as pas relu et fusionné." }));
 
   const setStatus = (text: string, kind: "" | "ok" | "err" = "") => {
     status.textContent = text;
@@ -192,44 +230,58 @@ export function buildSquad(actions: ViewActions): ViewHost {
     State.notify();
   }
 
-  function renderCard(job: SquadJob): HTMLElement {
-    const meta = h("div", { class: "sq-meta" });
-    meta.append(h("span", { class: `sq-state ${job.status}`, text: LABEL[job.status] }));
-    const step = stepOf(job);
-    if (step) meta.append(h("span", { class: "sq-step", text: step }));
-    const s = stats(job);
-    if (s) meta.append(h("span", { class: "sq-stats", text: s }));
+  function renderCard(first: SquadJob): Card {
+    let job = first;
+    const status = h("span", { class: `sq-state ${job.status}`, text: LABEL[job.status] });
+    const step = h("span", { class: "sq-step" });
+    const stat = h("span", { class: "sq-stats" });
+    const meta = h("div", { class: "sq-meta" }, status, step, stat);
     const row = h("div", { class: "sq-acts" });
+    const does = (action: "stop" | "discard" | "merge" | "diff" | "open") => () => void run(job, action);
     switch (job.status) {
       case "queued":
-        row.append(act("x", "Retirer", () => void run(job, "discard")));
+        row.append(sure("x", "Retirer", does("discard")));
         break;
       case "running":
-        row.append(act("review", "Diff", () => void run(job, "diff")), act("terminal", "Ouvrir", () => void run(job, "open")), act("stop", "Arrêter", () => void run(job, "stop")));
+        row.append(act("review", "Diff", does("diff")), act("terminal", "Ouvrir", does("open")), act("stop", "Arrêter", does("stop")));
         break;
       case "waiting":
-        row.append(act("message", "Répondre", () => void run(job, "open"), "primary"), act("stop", "Arrêter", () => void run(job, "stop")));
+        row.append(act("message", "Répondre", does("open"), "primary"), act("stop", "Arrêter", does("stop")));
         break;
       case "done":
-        row.append(act("commit", "Fusionner", () => void run(job, "merge"), "primary"), act("review", "Diff", () => void run(job, "diff")), act("terminal", "Continuer", () => void run(job, "open")), act("trash", "Jeter", () => void run(job, "discard"), "danger"));
+        row.append(act("commit", "Fusionner", does("merge"), "primary"), act("review", "Diff", does("diff")), act("terminal", "Continuer", does("open")), sure("trash", "Jeter", does("discard"), "danger"));
         break;
       case "empty":
-        row.append(act("terminal", "Ouvrir", () => void run(job, "open")), act("trash", "Jeter", () => void run(job, "discard"), "danger"));
+        row.append(act("terminal", "Ouvrir", does("open")), sure("trash", "Jeter", does("discard"), "danger"));
         break;
       case "failed":
-        row.append(act("trash", "Jeter", () => void run(job, "discard"), "danger"));
+        row.append(sure("trash", "Jeter", does("discard"), "danger"));
         break;
       default:
         break;
     }
-    const card = h(
+    const task = h("div", { class: "sq-task" });
+    const el = h(
       "div",
-      { class: `sq-job ${job.status}`, title: job.task },
-      h("div", { class: "sq-top" }, createMiniBot(botTask(job), 18), h("div", { class: "sq-task", text: shortTask(job.task, 80) }), job.night ? h("i", { class: "sq-moon", title: "Cette nuit" }, proIcon("moon", 11, 2.2)) : null),
+      { class: `sq-job ${job.status}` },
+      h("div", { class: "sq-top" }, createMiniBot(botTask(job), 18), task, job.night ? h("i", { class: "sq-moon", title: "Cette nuit" }, proIcon("moon", 11, 2.2)) : null),
       meta,
       row,
     );
-    return card;
+    const update = (next: SquadJob) => {
+      job = next;
+      el.title = job.task;
+      task.textContent = shortTask(job.task, 80);
+      const st = stepOf(job);
+      step.textContent = st;
+      step.style.display = st ? "" : "none";
+      const counts = stats(job);
+      stat.textContent = counts;
+      stat.style.display = counts ? "" : "none";
+      syncMiniBotStates([botTask(job)]);
+    };
+    update(job);
+    return { el, shape: shapeOf(job), update };
   }
 
   go.addEventListener("click", () => void launch());
@@ -299,21 +351,37 @@ export function buildSquad(actions: ViewActions): ViewHost {
         }
       }
 
-      const gk = open.map((j) => `${j.id}:${j.status}:${j.files}:${j.added}:${j.removed}:${j.note}:${stepOf(j)}:${liveTask(j)?.state ?? ""}`).join("|");
-      if (gk !== gridKey) {
-        gridKey = gk;
-        clear(grid);
-        if (!open.length) {
-          grid.append(h("div", { class: "sq-empty" },
-            h("b", { text: "Plusieurs Claude, en même temps." }),
-            h("span", { text: "Chacun travaille dans sa propre copie du projet (un worktree git) : rien ne touche ton dossier tant que tu n'as pas relu et fusionné." })));
-        } else {
-          const order: SquadJob["status"][] = ["waiting", "done", "running", "queued", "empty", "failed", "merged"];
-          const sorted = [...open].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || b.created - a.created);
-          for (const job of sorted) grid.append(renderCard(job));
-        }
-        pruneMiniBots();
+      const order: SquadJob["status"][] = ["waiting", "done", "running", "queued", "empty", "failed", "merged"];
+      const sorted = [...open].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || b.created - a.created);
+      const ids = new Set(sorted.map((j) => j.id));
+      let removed = false;
+      for (const [id, c] of cards) {
+        if (ids.has(id)) continue;
+        c.el.remove();
+        cards.delete(id);
+        removed = true;
       }
+      if (!sorted.length) {
+        if (!empty.isConnected) grid.append(empty);
+      } else {
+        empty.remove();
+        sorted.forEach((job, i) => {
+          let c = cards.get(job.id);
+          if (c && c.shape !== shapeOf(job)) {
+            c.el.remove();
+            cards.delete(job.id);
+            removed = true;
+            c = undefined;
+          }
+          if (c) c.update(job);
+          else {
+            c = renderCard(job);
+            cards.set(job.id, c);
+          }
+          if (grid.children[i] !== c.el) grid.insertBefore(c.el, grid.children[i] ?? null);
+        });
+      }
+      if (removed) pruneMiniBots();
       grid.classList.toggle("scroll", grid.scrollHeight > grid.clientHeight + 4);
       if (State.view === "squad") {
         const box = islandBox(el);

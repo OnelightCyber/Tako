@@ -353,8 +353,10 @@ function buildApproval(actions: ViewActions): ViewHost {
   const row = h("div", { class: "actions" });
   const body = stack(116, 16, who, code, row);
   const el = h("div", { class: "view fits" }, card("amber", body));
-  const hint = h("span", { class: "voice-hint" }, proIcon("mic", 11, 2.2), h("span", { text: "« Tako, oui » · « Tako, non »" }));
+  const hintText = h("span", { text: "« Tako, oui » · « Tako, non »" });
+  const hint = h("span", { class: "voice-hint" }, proIcon("mic", 11, 2.2), hintText);
   let rowKey = "";
+  let allow: HTMLElement | null = null;
   return {
     el,
     sync() {
@@ -375,12 +377,12 @@ function buildApproval(actions: ViewActions): ViewHost {
       if (rowKey !== "built") {
         rowKey = "built";
         clear(row);
-        row.append(
-          btn("Refuser", "secondary", () => actions.decide("deny"), "N"),
-          btn("Autoriser", "primary", () => actions.decide("allow"), "Y"),
-        );
+        allow = btn("Autoriser", "primary", () => actions.decide("allow"), "Y");
+        row.append(btn("Refuser", "secondary", () => actions.decide("deny"), "N"), allow);
       }
-      row.lastElementChild?.classList.toggle("guard", fresh);
+      allow?.classList.toggle("guard", fresh);
+      hintText.textContent = State.voiceHint || "« Tako, oui » · « Tako, non »";
+      hint.classList.toggle("warn", !!State.voiceHint);
       const spoken = State.settings.voiceEnabled && State.settings.voiceApprovals;
       if (spoken && !hint.isConnected) row.append(hint);
       else if (!spoken && hint.isConnected) hint.remove();

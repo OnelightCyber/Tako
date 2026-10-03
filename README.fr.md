@@ -449,9 +449,10 @@ npm run tauri dev       # l'app complète, rechargement à chaud
 npm run dev             # juste l'interface dans un navigateur
 ```
 
-- **Compiler** : Whisper est compilé depuis ses sources, il faut donc CMake et libclang. Installe LLVM
-  (`winget install LLVM.LLVM`) ou dépose `libclang.dll` dans `tools/libclang/` ; `.cargo/config.toml` active les
-  optimisations `/O2` que cmake-rs oublie avec MSVC.
+- **Compiler** : Whisper est compilé depuis ses sources, il faut donc CMake et libclang. Dépose `libclang.dll`
+  dans `tools/libclang/`, ou installe LLVM (`winget install LLVM.LLVM`) et règle `LIBCLANG_PATH` sur son dossier
+  `bin` (par exemple `C:\Program Files\LLVM\bin`), ce qui remplace la valeur par défaut de `.cargo/config.toml`.
+  Ce fichier active aussi les optimisations `/O2` que cmake-rs oublie avec MSVC.
 - **Démos de l'îlot** : <http://127.0.0.1:1420/?alive=glance> (aussi `session`, `lens-error`, `lens-address`,
   `lens-tracking`, `lens-english`, `voice-listen`, `voice-think`, `voice-answer`, `voice-fail`).
 - **Démo de la vue live** : `npm run dev` puis <http://127.0.0.1:1420/?demo> (ajoute

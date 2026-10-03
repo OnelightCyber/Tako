@@ -42,7 +42,7 @@ export function mapsUrl(address: string, directions: boolean): string {
 }
 
 function recentProject(): string | null {
-  const recent = [...State.sessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
+  const recent = [...State.ownSessions].sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0))[0];
   return recent?.sessionCwd ?? State.settings.recentProjects?.[0] ?? null;
 }
 

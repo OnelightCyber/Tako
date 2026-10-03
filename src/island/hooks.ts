@@ -127,7 +127,7 @@ function prune() {
     const stale = t.state === "idle" && now - (t.lastEventAt ?? 0) > STALE_MS;
     if (stale && t.id !== State.focusId) State.removeTask(t.id);
   }
-  const live = [...State.sessions].sort((a, b) => (a.lastEventAt ?? 0) - (b.lastEventAt ?? 0));
+  const live = [...State.ownSessions].sort((a, b) => (a.lastEventAt ?? 0) - (b.lastEventAt ?? 0));
   while (live.length >= MAX_SESSIONS) {
     const victim = live.find((t) => t.state === "idle") ?? live[0];
     live.splice(live.indexOf(victim), 1);
@@ -455,7 +455,7 @@ export function handleHook(island: Island, payload: HookPayload) {
     case "SessionStart":
       if (!fromSquad) claimFocus(task);
       surface("overview", false);
-      Sound.play("work");
+      if (!fromSquad) Sound.play("work");
       break;
 
     case "UserPromptSubmit": {
@@ -503,7 +503,7 @@ export function handleHook(island: Island, payload: HookPayload) {
     case "PostToolUse": {
       task.state = "working";
       const done = finishActivity(task, payload, false);
-      const passed = done?.kind === "shell" ? testSummary(done.command ?? "", done.output ?? "") : null;
+      const passed = done?.kind === "shell" && !fromSquad ? testSummary(done.command ?? "", done.output ?? "") : null;
       if (passed) {
         island.celebrate();
         if (State.mode !== "expanded") {
@@ -525,7 +525,7 @@ export function handleHook(island: Island, payload: HookPayload) {
       const lower = message.toLowerCase();
       if (lower.includes("rate limit") || lower.includes("limite d")) {
         task.state = "ratelimit";
-        Sound.play("rate");
+        if (!fromSquad) Sound.play("rate");
       } else if (message.endsWith("?")) {
         task.state = "question";
         State.appendStep(task.id, message);
@@ -554,7 +554,7 @@ export function handleHook(island: Island, payload: HookPayload) {
 
     case "StopFailure":
       task.state = "error";
-      Sound.play("error");
+      if (!fromSquad) Sound.play("error");
       if (focused()) surface("error", true);
       else task.pillBadge = "error";
       break;

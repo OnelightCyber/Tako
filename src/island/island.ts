@@ -25,6 +25,7 @@ import { feedViz, idleViz, vizEl } from "../views/viz";
 import { proIcon } from "../views/pro-icons";
 import { weatherIcon, weatherTone } from "../views/weather";
 import { VoiceUi } from "../views/voice";
+import { ChatBus } from "../views/chat";
 import { artColor } from "./art";
 
 const BOT_OVERHANG = 40;
@@ -124,6 +125,7 @@ export class Island {
   private pressed = false;
   private wheelAt = 0;
   private wheelSum = 0;
+  private wheelQuietUntil = 0;
   private artKey = "";
   private dotsKey = "";
   private trailKey = "";
@@ -334,7 +336,10 @@ export class Island {
     if (this.voiceRelease != null) window.clearTimeout(this.voiceRelease);
     this.voiceRelease = window.setTimeout(() => {
       this.voiceRelease = null;
-      if (State.mode === "expanded" && State.view === "voice" && !this.wasInIsland && !State.isPinned) this.collapse();
+      if (State.mode !== "expanded" || State.view !== "voice") return;
+      const req = State.pendingApproval;
+      if (req) this.setView(req.kind === "review" ? "review" : "approval");
+      else if (!this.wasInIsland && !State.isPinned) this.collapse();
     }, delayMs);
   }
 
@@ -455,6 +460,7 @@ export class Island {
 
   private wireFsm() {
     this.fsm.hold = () => !!Hud.current;
+    this.fsm.homeHold = () => this.typingHold();
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.onTransition = (from, to) => {
       switch (to) {
@@ -469,7 +475,8 @@ export class Island {
           if (!this.wasInIsland) this.fsm.mouseLeft();
           break;
         case "home":
-          this.expand(State.defaultView());
+          if (from === "tako") this.greeting.interrupt();
+          this.expand(this.homeView());
           if (!this.wasInIsland) this.fsm.mouseLeft();
           break;
         case "tako":
@@ -483,6 +490,12 @@ export class Island {
 
   launch() {
     this.fsm.launch();
+  }
+
+  private homeView(): IslandViewName {
+    const req = State.pendingApproval;
+    if (req) return req.kind === "review" ? "review" : "approval";
+    return State.defaultView();
   }
 
   private setMode(mode: IslandMode) {
@@ -528,7 +541,7 @@ export class Island {
 
   setView(view: IslandViewName) {
     this.stopSequenceIfLeaving(view);
-    if (State.mode !== "expanded") {
+    if (State.mode !== "expanded" || this.fsm.state === "tako") {
       this.fsm.forceHome();
       State.view = view;
       this.animateGeometry(false);
@@ -836,18 +849,30 @@ export class Island {
       if (!sideways) return;
       e.preventDefault();
       const now = performance.now();
+      if (now < this.wheelQuietUntil) {
+        this.wheelQuietUntil = Math.max(this.wheelQuietUntil, now + 180);
+        return;
+      }
       if (now - this.wheelAt > 260) this.wheelSum = 0;
       this.wheelAt = now;
       this.wheelSum += sideways;
       if (Math.abs(this.wheelSum) < 40) return;
       const direction = this.wheelSum > 0 ? 1 : -1;
-      this.wheelSum = -direction * 400;
+      this.wheelSum = 0;
+      this.wheelQuietUntil = now + 350;
       this.shiftLive(direction);
     }, { passive: false });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && State.mode === "expanded" && !State.isPinned) this.collapse();
       State.lastActivity = performance.now();
+      const target = e.target as HTMLElement | null;
+      const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (typing || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+      if (State.mode !== "expanded" || State.view !== "approval" || !State.pendingApproval) return;
+      const key = e.key.toLowerCase();
+      if (key === "y") decideCurrent(this, "allow");
+      else if (key === "n") decideCurrent(this, "deny");
     });
 
     let dragDepth = 0;
@@ -996,7 +1021,8 @@ export class Island {
 
   private frame = (nowMs: number) => {
     const moving = this.width.animating || this.height.animating || this.radius.animating || this.jellyMoving;
-    if (nowMs - this.lastFrame < (moving ? 1000 / 121 : 1000 / 61)) {
+    const ambient = !moving && !this.dirty && State.mode !== "expanded" && !this.live.animating && !this.dancing && this.engine.voice === "off";
+    if (nowMs - this.lastFrame < (moving ? 1000 / 121 : ambient ? 1000 / 31 : 1000 / 61)) {
       requestAnimationFrame(this.frame);
       return;
     }
@@ -1012,6 +1038,8 @@ export class Island {
     if (this.dirty) {
       this.dirty = false;
       this.syncDom();
+    } else if (State.mode === "expanded" && this.width.animating) {
+      this.views.get(State.view)?.sync();
     }
 
     this.updateBotTargets();
@@ -1192,7 +1220,15 @@ export class Island {
     return Math.round(-Math.tanh((State.mouse.y - this.botCy.value) / 200) * step) / step;
   }
 
+  private typingHold(): boolean {
+    if (State.view === "prompt" && ChatBus.busy) return true;
+    const el = document.activeElement;
+    const field = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    return field && document.hasFocus() && this.islandEl.contains(el) && el.value.trim() !== "";
+  }
+
   private updateCountdown(nowMs: number) {
+    if (this.homeCollapseAt != null && this.typingHold()) this.homeCollapseAt = nowMs + State.settings.autoCloseInterval * 1000;
     if (State.mode !== "expanded" || State.isPinned || this.homeCollapseAt == null) {
       this.countdown.style.width = "0px";
       return;
@@ -1231,7 +1267,7 @@ export class Island {
       const on = name === State.view;
       view.el.classList.toggle("on", on);
       this.park(view.el, !on);
-      if (on) view.sync();
+      if (on && expanded) view.sync();
     }
 
     if (this.lastSyncedView !== State.view) {

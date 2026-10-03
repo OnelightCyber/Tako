@@ -74,6 +74,7 @@ export class HudLayer {
     this.el.classList.toggle("on", on);
     if (!spec) {
       this.spec = null;
+      this.el.classList.remove("hud-pulse");
       return;
     }
     if (spec.id === this.shownId && this.spec === spec) return;

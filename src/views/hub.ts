@@ -4,7 +4,7 @@ import { State } from "../core/state";
 import { Timer } from "../core/timer";
 import { dropNotice, openNotice } from "../island/system";
 import { h, clear } from "./dom";
-import { islandBox, setSizeHint } from "./fit";
+import { contentHeight, islandBox, setSizeHint } from "./fit";
 import { proIcon, type ProIconName } from "./pro-icons";
 import { weatherIcon, weatherLabel, weatherTone } from "./weather";
 import type { ViewActions, ViewHost } from "./views";
@@ -169,7 +169,7 @@ export function buildNotifications(actions: ViewActions): ViewHost {
   const measure = () => {
     if (State.view !== "notifications" || State.mode !== "expanded") return;
     const box = islandBox(el);
-    if (box) setSizeHint("notifications", 0, box.h - list.clientHeight + list.scrollHeight);
+    if (box) setSizeHint("notifications", 0, box.h - list.clientHeight + contentHeight(list));
   };
   return {
     el,

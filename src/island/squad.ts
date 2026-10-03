@@ -79,8 +79,13 @@ async function maybeDawn(island: Island) {
 }
 
 export function nightDeny(cwd: string | null | undefined): boolean {
-  const c = (cwd ?? "").replace(/\//g, "\\").toLowerCase();
-  return State.squad.some((j) => j.night && j.status !== "queued" && c.startsWith(j.worktree.toLowerCase()));
+  const norm = (p: string) => p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  const c = norm(cwd ?? "");
+  if (!c) return false;
+  return State.squad.some((j) => {
+    const w = norm(j.worktree);
+    return j.night && j.status !== "queued" && (c === w || c.startsWith(`${w}\\`));
+  });
 }
 
 export function registerSquad(island: Island) {

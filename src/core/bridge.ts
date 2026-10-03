@@ -119,7 +119,7 @@ export const Bridge = {
   downloadReveal: (path: string) => call<boolean>("download_reveal", { path }),
   notificationOpen: (appId: string) => call<boolean>("notification_open", { appId }),
   hudTest: (kind: string) => call<void>("hud_test", { kind }),
-  voiceListen: () => call<void>("voice_listen"),
+  voiceListen: () => call<number>("voice_listen"),
   voiceCancel: () => call<void>("voice_cancel"),
   sttStatus: () => call<SttStatus>("stt_status"),
   sttDownload: () => call<void>("stt_download"),
@@ -210,6 +210,7 @@ export interface SttProgress {
 }
 
 export interface VoiceFinal {
+  id?: number;
   text: string;
   error: string | null;
 }

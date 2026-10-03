@@ -15,6 +15,7 @@ const WORDS: Record<string, number> = {
   onze: 11, douze: 12, quinze: 15, vingt: 20, "vingt-cinq": 25, trente: 30, quarante: 40, "quarante-cinq": 45, cinquante: 50, soixante: 60,
 };
 const APPROVAL_DELAY_MS = 1200;
+const LISTEN_LIMIT_MS = 30_000;
 const SPEECH_GAIN = 0.7;
 
 interface Local {
@@ -31,6 +32,13 @@ let source: AudioBufferSourceNode | null = null;
 let resumeMusic = false;
 let lastWake = 0;
 let awaiting = false;
+let listenTimer: number | null = null;
+let listenId: number | null = null;
+
+function clearListenTimer() {
+  if (listenTimer != null) window.clearTimeout(listenTimer);
+  listenTimer = null;
+}
 
 export function plain(text: string): string {
   return text
@@ -73,13 +81,35 @@ function clock(d = new Date()): string {
   return `${d.getHours()} h${m ? ` ${String(m).padStart(2, "0")}` : ""}`;
 }
 
+const NUMBER = `\\d+(?:[.,]\\d+)?|${Object.keys(WORDS).sort((a, b) => b.length - a.length).join("|")}`;
+const HOURS = new RegExp(`(?:^|\\s)(${NUMBER}) ?(?:h|heures?)(?: et)?(?: ?(demie?|quart|${NUMBER}))?(?: ?(?:min|minutes?))?(?=\\s|$)`);
+
+function count(word: string): number {
+  return /\d/.test(word) ? Number(word.replace(",", ".")) : WORDS[word] ?? Number.NaN;
+}
+
 export function timerMinutes(text: string): number | null {
-  if (/\bdemi(-| )?heure\b/.test(text) && !/\d|\bheures?\b.*\bheures?\b/.test(text)) return 30;
+  if (/\btrois quarts? d heure\b/.test(text)) return 45;
+  if (/\bquart d heure\b/.test(text)) return 15;
+  const hm = HOURS.exec(text);
+  if (hm) {
+    const rest = hm[2];
+    const extra = !rest ? 0 : rest.startsWith("demi") ? 30 : rest === "quart" ? 15 : count(rest);
+    const total = count(hm[1]) * 60 + extra;
+    return Number.isFinite(total) && total > 0 ? Math.round(total) : null;
+  }
+  if (/\bdemi(-| )?heure\b/.test(text)) return 30;
   const n = amount(text);
   if (n == null || n <= 0) return null;
-  if (/\bheures?\b|\b\d+ ?h\b/.test(text)) return Math.round(n * 60);
   if (/\bsecondes?\b|\bsec\b/.test(text)) return Math.max(1, Math.ceil(n / 60));
   return Math.round(n);
+}
+
+export function duration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m} minute${m > 1 ? "s" : ""}`;
+  return `${h} heure${h > 1 ? "s" : ""}${m ? ` ${m}` : ""}`;
 }
 
 export function localIntent(raw: string): Local | null {
@@ -105,12 +135,12 @@ export function localIntent(raw: string): Local | null {
     const minutes = timerMinutes(t);
     if (minutes == null) return { say: "Dis-moi une durée, par exemple : minuteur de cinq minutes." };
     if (minutes > 600) return { say: "C'est un peu long pour un minuteur." };
-    const label = minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} heure${minutes > 60 ? "s" : ""}` : `${minutes} minute${minutes > 1 ? "s" : ""}`;
-    return { say: `Minuteur de ${label} lancé.`, run: () => Timer.startMinutes(minutes) };
+    return { say: `Minuteur de ${duration(minutes)} lancé.`, run: () => Timer.startMinutes(minutes) };
   }
   const m = State.media;
   if (m?.active) {
     if (/^(mets? (la musique |la video )?en )?pause$|^pause( la musique)?$|^(coupe|arrete) la musique$/.test(t)) {
+      if (resumeMusic) return { say: "", keepMusic: true };
       return m.playing ? { say: "", run: () => void Bridge.mediaControl("toggle"), keepMusic: true } : { say: "C'est déjà en pause." };
     }
     if (/^(reprends|relance|remets)( la musique| la lecture)?$|^lecture$|^play$/.test(t)) {
@@ -205,7 +235,19 @@ export function listen() {
   island.voiceMood("listen");
   island.openVoice();
   awaiting = true;
-  void Bridge.voiceListen();
+  const mine = flow;
+  clearListenTimer();
+  listenTimer = window.setTimeout(() => {
+    listenTimer = null;
+    if (!awaiting || mine !== flow) return;
+    awaiting = false;
+    void Bridge.voiceCancel();
+    finish(failure("silence"), true);
+  }, LISTEN_LIMIT_MS);
+  listenId = null;
+  void Bridge.voiceListen().then((id) => {
+    if (mine === flow && awaiting) listenId = id;
+  });
   State.notify();
 }
 
@@ -232,6 +274,7 @@ export async function announce(text: string) {
 
 export function stop() {
   flow++;
+  clearListenTimer();
   if (awaiting) void Bridge.voiceCancel();
   awaiting = false;
   stopSpeaking();
@@ -281,6 +324,7 @@ async function play(url: string, token: number): Promise<void> {
   running = false;
   if (source === node) source = null;
   island.voiceLevel(0);
+  if (!source) void ctx?.suspend().catch(() => undefined);
 }
 
 async function speak(text: string, mine: number) {
@@ -341,7 +385,9 @@ async function ask(text: string, mine: number) {
 
 async function onFinal(final: VoiceFinal) {
   if (!awaiting) return;
+  if (final.id != null && listenId != null && final.id !== listenId) return;
   awaiting = false;
+  clearListenTimer();
   const mine = flow;
   const text = final.text.trim();
   if (final.error === "canceled") return;
@@ -368,13 +414,26 @@ async function onFinal(final: VoiceFinal) {
   await ask(text, mine);
 }
 
+let hintTimer: number | null = null;
+
+function showHint(text: string) {
+  State.voiceHint = text;
+  if (hintTimer != null) window.clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(() => {
+    hintTimer = null;
+    State.voiceHint = "";
+    State.notify();
+  }, 2800);
+  State.notify();
+}
+
 function onApproval(heard: VoiceHeard): boolean {
   const req = State.pendingApproval;
   if (!req || !State.settings.voiceApprovals) return false;
   if (Date.now() - (req.shownAt ?? 0) < APPROVAL_DELAY_MS) return true;
   if (heard.kind === "yes") {
     if (!heard.sure) {
-      island.hud({ key: "voice-approval", tone: "#F5A524", icon: "mic", title: "Pas sûr d'avoir compris", detail: "Redis « Tako, oui » bien distinctement.", ms: 2600, priority: 2 });
+      showHint("Pas sûr d'avoir compris : redis « Tako, oui »");
       return true;
     }
     decideCurrent(island, "allow");
@@ -390,10 +449,12 @@ function onHeard(heard: VoiceHeard) {
     if (State.voicePhase !== "idle" || State.view === "voice") stop();
     return;
   }
+  if (source || State.voicePhase === "speaking") return;
   if (heard.kind === "yes" || heard.kind === "no") {
     onApproval(heard);
     return;
   }
+  if (State.pendingApproval) return;
   const now = Date.now();
   if (now - lastWake < 900 || State.voicePhase === "listening") return;
   lastWake = now;

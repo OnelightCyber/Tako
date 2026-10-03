@@ -53,7 +53,8 @@ export function buildToday(actions: ViewActions): ViewHost {
     sync() {
       const now = new Date();
       const w = State.weather;
-      const k = `${now.toDateString()}|${w ? `${w.city}${Math.round(w.temp)}${w.code}${w.days.length}` : "none"}|${State.settings.weatherEnabled}|${State.settings.weatherCity}`;
+      const days = w ? w.days.map((d) => `${d.date}:${d.code}:${Math.round(d.max)}:${Math.round(d.min)}`).join(",") : "";
+      const k = `${now.toDateString()}|${w ? `${w.city}${Math.round(w.temp)}${w.code}${w.isDay}${Math.round(w.min)}${Math.round(w.max)}${days}` : "none"}|${State.settings.weatherEnabled}|${State.settings.weatherCity}`;
       if (k === key) return;
       key = k;
       month.textContent = MONTHS[now.getMonth()];
