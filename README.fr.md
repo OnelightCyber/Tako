@@ -43,6 +43,7 @@ un vrai navigateur**.
 - [Développement](#développement)
 - [Arborescence](#arborescence)
 - [Feuille de route](#feuille-de-route)
+- [Historique des versions](CHANGELOG.fr.md)
 - [Licence](#licence)
 
 ---

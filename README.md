@@ -43,6 +43,7 @@ Next to it, a **chat that runs through your own Claude Code account** — no API
 - [Development](#development)
 - [Project layout](#project-layout)
 - [Roadmap](#roadmap)
+- [Changelog](CHANGELOG.md)
 - [License](#license)
 
 ---
