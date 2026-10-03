@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+const STALL: Duration = Duration::from_secs(30);
+
 pub struct Asset {
     pub file: &'static str,
     pub url: &'static str,
@@ -26,11 +28,33 @@ pub async fn fetch(asset: &Asset, dir: &Path, mut progress: impl FnMut(u64)) -> 
     let target = dir.join(asset.file);
     let part = dir.join(format!("{}.part", asset.file));
     let client = reqwest::Client::builder().connect_timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
-    let mut response = client.get(asset.url).send().await.map_err(|_| "offline".to_string())?.error_for_status().map_err(|e| e.to_string())?;
+    let mut response = tokio::time::timeout(STALL, client.get(asset.url).send())
+        .await
+        .map_err(|_| "stalled".to_string())?
+        .map_err(|_| "offline".to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let mut received = 0u64;
-    while let Some(chunk) = response.chunk().await.map_err(|_| "offline".to_string())? {
+    loop {
+        let next = match tokio::time::timeout(STALL, response.chunk()).await {
+            Ok(next) => next,
+            Err(_) => {
+                drop(file);
+                let _ = std::fs::remove_file(&part);
+                return Err("stalled".into());
+            }
+        };
+        let chunk = match next {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                drop(file);
+                let _ = std::fs::remove_file(&part);
+                return Err("offline".into());
+            }
+        };
         hasher.update(&chunk);
         file.write_all(&chunk).map_err(|e| e.to_string())?;
         received += chunk.len() as u64;

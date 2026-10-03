@@ -14,6 +14,7 @@ use crate::{log, settings};
 
 const NO_WINDOW: u32 = 0x0800_0000;
 const TIMEOUT: Duration = Duration::from_secs(25);
+const QUEUE: Duration = Duration::from_secs(6);
 
 const RUNTIME: Asset = Asset {
     file: "piper_windows_amd64.zip",
@@ -25,13 +26,13 @@ const RUNTIME: Asset = Asset {
 const SIWIS: [Asset; 2] = [
     Asset {
         file: "fr_FR-siwis-medium.onnx",
-        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx",
         sha256: "641d1ab097da2b81128c076810edb052b385decc8be3381814802a64a73baf99",
         size: 63_201_294,
     },
     Asset {
         file: "fr_FR-siwis-medium.onnx.json",
-        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json",
         sha256: "39479916c2db192b5ac9764daddd0c744d83e023ad890c6976c0633ae4df8959",
         size: 4_875,
     },
@@ -40,13 +41,13 @@ const SIWIS: [Asset; 2] = [
 const UPMC: [Asset; 2] = [
     Asset {
         file: "fr_FR-upmc-medium.onnx",
-        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx",
         sha256: "9abb3800c199148897a9ed64e100d224f3de83579f100044174ad19418f1786f",
         size: 76_733_615,
     },
     Asset {
         file: "fr_FR-upmc-medium.onnx.json",
-        url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx.json",
+        url: "https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx.json",
         sha256: "e8636ec15dfd5d72db37a02cb5320a20f2b8d339f2a0e4337da64c58a33a5868",
         size: 4_996,
     },
@@ -206,8 +207,12 @@ pub fn synthesize(id: &str, text: &str) -> Result<Vec<u8>, String> {
     if !ready(id) {
         return Err("voice".into());
     }
-    if BUSY.swap(true, Ordering::SeqCst) {
-        return Err("busy".into());
+    let waiting = Instant::now();
+    while BUSY.swap(true, Ordering::SeqCst) {
+        if waiting.elapsed() > QUEUE {
+            return Err("busy".into());
+        }
+        std::thread::sleep(Duration::from_millis(40));
     }
     let result = run(v, text);
     BUSY.store(false, Ordering::SeqCst);
@@ -216,17 +221,20 @@ pub fn synthesize(id: &str, text: &str) -> Result<Vec<u8>, String> {
 
 fn run(v: &Voice, text: &str) -> Result<Vec<u8>, String> {
     let line = text.replace(['\r', '\n'], " ");
-    let out = root().join(format!("speech-{}.wav", std::process::id()));
+    let name = format!("speech-{}.wav", std::process::id());
+    let out = root().join(&name);
     let _ = std::fs::remove_file(&out);
     let mut child = Command::new(exe())
         .arg("--model")
-        .arg(voices_dir().join(v.files[0].file))
+        .arg(PathBuf::from("..").join("voices").join(v.files[0].file))
         .arg("--speaker")
         .arg(v.speaker.to_string())
+        .arg("--espeak_data")
+        .arg("espeak-ng-data")
         .arg("--output_file")
-        .arg(&out)
+        .arg(PathBuf::from("..").join(&name))
         .arg("--quiet")
-        .current_dir(exe().parent().unwrap_or(&root()))
+        .current_dir(root().join("piper"))
         .creation_flags(NO_WINDOW)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

@@ -49,26 +49,28 @@ fn read(manager: &INetworkListManager) -> Option<Network> {
 
 pub struct Debounce {
     offline_ticks: u32,
-    reported: Option<bool>,
+    seen_online: bool,
+    down: bool,
 }
 
 impl Debounce {
     pub fn new(online: bool) -> Self {
-        Self { offline_ticks: 0, reported: Some(online) }
+        Self { offline_ticks: 0, seen_online: online, down: false }
     }
 
     pub fn feed(&mut self, online: bool) -> Option<bool> {
         if online {
             self.offline_ticks = 0;
-            if self.reported != Some(true) {
-                self.reported = Some(true);
+            self.seen_online = true;
+            if self.down {
+                self.down = false;
                 return Some(true);
             }
             return None;
         }
         self.offline_ticks += 1;
-        if self.offline_ticks >= LOST_AFTER && self.reported != Some(false) {
-            self.reported = Some(false);
+        if self.seen_online && self.offline_ticks >= LOST_AFTER && !self.down {
+            self.down = true;
             return Some(false);
         }
         None
@@ -84,9 +86,9 @@ pub fn start(app: AppHandle) {
             crate::log::line("network: list manager unavailable");
             return;
         };
-        let first = read(&manager).unwrap_or_default();
-        let mut gate = Debounce::new(first.online);
-        let mut name = first.name;
+        let first = read(&manager);
+        let mut gate = Debounce::new(first.as_ref().is_some_and(|n| n.online));
+        let mut name = first.map(|n| n.name).unwrap_or_default();
         let mut last = std::time::Instant::now();
         let mut grace = 0u32;
         loop {
@@ -96,18 +98,17 @@ pub fn start(app: AppHandle) {
             }
             last = std::time::Instant::now();
             let Some(now) = read(&manager) else { continue };
-            if grace > 0 {
-                grace -= 1;
-                if now.online {
-                    gate = Debounce::new(true);
-                    grace = 0;
-                }
-                continue;
-            }
-            let flipped = gate.feed(now.online);
             if !now.name.is_empty() {
                 name = now.name.clone();
             }
+            if grace > 0 {
+                grace -= 1;
+                if !now.online {
+                    continue;
+                }
+                grace = 0;
+            }
+            let flipped = gate.feed(now.online);
             if let (Some(online), true) = (flipped, ENABLED.load(Ordering::Relaxed)) {
                 let _ = app.emit_to(WINDOW_LABEL, "network", Network { online, name: name.clone() });
             }
@@ -129,6 +130,27 @@ mod tests {
         assert_eq!(d.feed(false), Some(false));
         assert_eq!(d.feed(false), None);
         assert_eq!(d.feed(true), Some(true));
+        assert_eq!(d.feed(true), None);
+    }
+
+    #[test]
+    fn starting_offline_is_not_announced_as_a_reconnection() {
+        let mut d = Debounce::new(false);
+        for _ in 0..6 {
+            assert_eq!(d.feed(false), None);
+        }
+        assert_eq!(d.feed(true), None);
+        assert_eq!(d.feed(false), None);
+        assert_eq!(d.feed(false), None);
+        assert_eq!(d.feed(false), Some(false));
+        assert_eq!(d.feed(true), Some(true));
+    }
+
+    #[test]
+    fn coming_back_online_is_only_told_after_a_told_outage() {
+        let mut d = Debounce::new(true);
+        assert_eq!(d.feed(true), None);
+        assert_eq!(d.feed(false), None);
         assert_eq!(d.feed(true), None);
     }
 }

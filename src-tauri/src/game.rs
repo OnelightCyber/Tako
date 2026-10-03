@@ -91,11 +91,15 @@ pub fn is_work_app(exe_stem: &str) -> bool {
     WORK_APPS.contains(&lower.as_str())
 }
 
+fn names(lower: &str, key: &str) -> bool {
+    lower == key || lower.strip_prefix(key).is_some_and(|rest| rest.starts_with(['_', '-', '.', ' ']))
+}
+
 pub fn pretty(exe_stem: &str) -> String {
     let lower = exe_stem.to_lowercase();
     NAMES
         .iter()
-        .find(|(key, _)| lower == *key || lower.starts_with(key))
+        .find(|(key, _)| names(&lower, key))
         .map(|(_, name)| name.to_string())
         .unwrap_or_else(|| exe_stem.to_string())
 }
@@ -241,5 +245,19 @@ mod tests {
         assert_eq!(pretty("FortniteClient-Win64-Shipping"), "Fortnite");
         assert_eq!(pretty("SomeIndieGame"), "SomeIndieGame");
         assert_eq!(pretty("RainbowSix"), "Rainbow Six Siege");
+    }
+
+    #[test]
+    fn variants_of_a_game_keep_its_name_but_lookalikes_do_not() {
+        assert_eq!(pretty("cod"), "Call of Duty");
+        assert_eq!(pretty("RainbowSix_BE"), "Rainbow Six Siege");
+        assert_eq!(pretty("r5apex_dx12"), "Apex Legends");
+        assert_eq!(pretty("FortniteClient-Win64-Shipping_EAC"), "Fortnite");
+        assert_eq!(pretty("GTA5_Enhanced"), "GTA V");
+        assert_eq!(pretty("codeblocks"), "codeblocks");
+        assert_eq!(pretty("VSCodium"), "VSCodium");
+        assert_eq!(pretty("codex"), "codex");
+        assert_eq!(pretty("chromebook-emulator"), "chromebook-emulator");
+        assert_eq!(pretty("vlcplayer"), "vlcplayer");
     }
 }

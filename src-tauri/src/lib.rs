@@ -177,8 +177,8 @@ fn weather_failure() -> Option<String> {
 }
 
 #[tauri::command]
-fn voice_listen() {
-    voice::listen();
+fn voice_listen() -> u64 {
+    voice::listen()
 }
 
 #[tauri::command]

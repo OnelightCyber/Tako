@@ -12,16 +12,23 @@ use crate::{log, settings};
 
 const MODEL_FILE: Asset = Asset {
     file: "ggml-small-q5_1.bin",
-    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
     sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
     size: 190_085_487,
 };
 const SIZE: u64 = MODEL_FILE.size;
 const IDLE: Duration = Duration::from_secs(180);
 const PROMPT: &str = "Tako, Claude, minuteur, JavaScript.";
-const HALLUCINATIONS: &[&str] = &[
-    "amara.org", "sous-titres", "sous-titrage", "merci d'avoir regardé", "abonnez-vous", "n'oubliez pas de vous abonner",
+const GHOST_MARKERS: &[&str] = &[
+    "amara org", "sous titres", "sous titrage", "merci d avoir regarde", "abonnez vous", "oubliez pas de vous abonner",
     "thanks for watching", "subtitles by",
+];
+const GHOST_WORDS: &[&str] = &[
+    "sous", "titres", "titre", "titrage", "realises", "realise", "par", "la", "le", "les", "l", "communaute", "d", "de", "du", "des",
+    "amara", "org", "merci", "avoir", "regarde", "regardee", "cette", "video", "videos", "abonnez", "abonne", "vous", "n", "oubliez",
+    "pas", "abonner", "a", "et", "bientot", "prochaine", "thanks", "thank", "you", "for", "watching", "subtitles", "by", "the",
+    "community", "st", "societe", "radio", "canada", "s", "il", "plait", "chaine", "ma", "notre", "votre", "www", "com", "fr",
+    "j", "aime", "like", "pouce", "bleu", "un", "une", "mettre", "partagez", "commentez", "suivante", "voir",
 ];
 
 struct Loaded {
@@ -115,10 +122,33 @@ pub fn audio_context(samples: usize) -> i32 {
     (((seconds + 1.0) * 100.0) as i32).clamp(256, 1500)
 }
 
+fn fold(c: char) -> char {
+    match c {
+        'à' | 'â' | 'ä' | 'á' => 'a',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'î' | 'ï' | 'í' => 'i',
+        'ô' | 'ö' | 'ó' => 'o',
+        'ù' | 'û' | 'ü' | 'ú' => 'u',
+        'ç' => 'c',
+        c if c.is_alphanumeric() => c,
+        _ => ' ',
+    }
+}
+
+pub fn ghost(text: &str) -> bool {
+    let folded: String = text.to_lowercase().chars().map(fold).collect();
+    let words: Vec<&str> = folded.split_whitespace().collect();
+    if words.is_empty() {
+        return true;
+    }
+    let joined = words.join(" ");
+    GHOST_MARKERS.iter().any(|m| joined.contains(m))
+        && words.iter().all(|w| GHOST_WORDS.contains(w) || w.chars().all(|c| c.is_ascii_digit()))
+}
+
 pub fn clean(text: &str) -> String {
     let t = text.trim().trim_matches(|c: char| c == '"' || c == '«' || c == '»').trim().to_string();
-    let lower = t.to_lowercase();
-    if HALLUCINATIONS.iter().any(|h| lower.contains(h)) || t.chars().all(|c| !c.is_alphanumeric()) {
+    if t.chars().all(|c| !c.is_alphanumeric()) || ghost(&t) {
         return String::new();
     }
     t
@@ -212,8 +242,21 @@ mod tests {
     fn whisper_ghost_captions_are_dropped() {
         assert_eq!(clean(" Sous-titres réalisés par la communauté d'Amara.org"), "");
         assert_eq!(clean("Merci d'avoir regardé !"), "");
+        assert_eq!(clean("Merci d'avoir regardé cette vidéo !"), "");
+        assert_eq!(clean("Sous-titrage ST' 501"), "");
+        assert_eq!(clean("Abonnez-vous !"), "");
+        assert_eq!(clean("N'oubliez pas de vous abonner à la chaîne."), "");
+        assert_eq!(clean("Thanks for watching!"), "");
         assert_eq!(clean(" ... "), "");
         assert_eq!(clean(" Quelle heure est-il ? "), "Quelle heure est-il ?");
+    }
+
+    #[test]
+    fn real_questions_that_mention_captions_are_kept() {
+        assert_eq!(clean("Comment désactiver les sous-titres sur YouTube ?"), "Comment désactiver les sous-titres sur YouTube ?");
+        assert_eq!(clean("Merci d'avoir regardé mon code, tu peux corriger le bug ?"), "Merci d'avoir regardé mon code, tu peux corriger le bug ?");
+        assert_eq!(clean("Écris un message pour dire abonnez-vous à ma newsletter"), "Écris un message pour dire abonnez-vous à ma newsletter");
+        assert_eq!(clean("Merci."), "Merci.");
     }
 
     #[test]

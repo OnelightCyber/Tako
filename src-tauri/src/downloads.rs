@@ -12,6 +12,9 @@ use windows::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath, KF_FLA
 use crate::island::WINDOW_LABEL;
 
 const EVERY: Duration = Duration::from_secs(1);
+const CALM: Duration = Duration::from_millis(2500);
+const OFF: Duration = Duration::from_secs(3);
+const MARK_CHECKS: u32 = 4;
 const TEMP_EXTS: &[&str] = &["crdownload", "part", "partial", "download", "opdownload"];
 const SAFE_TO_OPEN: &[&str] = &[
     "pdf", "txt", "md", "csv", "json", "log", "rtf", "odt", "ods", "odp", "docx", "xlsx", "pptx", "epub",
@@ -118,6 +121,12 @@ pub fn open(path: &str) -> bool {
     std::process::Command::new("explorer.exe").arg(plain(&file)).spawn().is_ok()
 }
 
+fn from_web(folder: &Path, name: &str) -> bool {
+    let mut stream = folder.join(name).into_os_string();
+    stream.push(":Zone.Identifier");
+    std::fs::metadata(stream).is_ok()
+}
+
 fn done(name: &str, size: u64, folder: &Path) -> Download {
     Download {
         name: name.to_string(),
@@ -129,8 +138,14 @@ fn done(name: &str, size: u64, folder: &Path) -> Download {
     }
 }
 
-fn diff(previous: &HashMap<String, Entry>, now: &HashMap<String, Entry>, folder: &Path, elapsed: f64) -> Vec<Download> {
+struct Changes {
+    events: Vec<Download>,
+    unmarked: Vec<String>,
+}
+
+fn diff(previous: &HashMap<String, Entry>, now: &HashMap<String, Entry>, folder: &Path, elapsed: f64, marked: &dyn Fn(&str) -> bool) -> Changes {
     let mut out = Vec::new();
+    let mut unmarked = Vec::new();
     let mut finished: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (name, entry) in now {
         if !entry.temp {
@@ -170,10 +185,14 @@ fn diff(previous: &HashMap<String, Entry>, now: &HashMap<String, Entry>, folder:
         let filled = previous.get(name).is_some_and(|p| p.size == 0);
         if appeared || filled {
             finished.insert(name.clone());
-            out.push(done(name, entry.size, folder));
+            if marked(name) {
+                out.push(done(name, entry.size, folder));
+            } else {
+                unmarked.push(name.clone());
+            }
         }
     }
-    out
+    Changes { events: out, unmarked }
 }
 
 pub fn start(app: AppHandle) {
@@ -182,21 +201,44 @@ pub fn start(app: AppHandle) {
             crate::log::line("downloads: folder not found");
             return;
         };
-        let mut previous = list(&folder);
+        let mut previous: Option<HashMap<String, Entry>> = None;
+        let mut waiting: HashMap<String, u32> = HashMap::new();
         let mut at = Instant::now();
+        let mut pause = EVERY;
         loop {
-            std::thread::sleep(EVERY);
+            std::thread::sleep(pause);
+            if !ENABLED.load(Ordering::Relaxed) {
+                previous = None;
+                waiting.clear();
+                pause = OFF;
+                continue;
+            }
             let now = list(&folder);
             let elapsed = at.elapsed().as_secs_f64().max(0.2);
             at = Instant::now();
-            if !ENABLED.load(Ordering::Relaxed) {
-                previous = now;
+            let Some(before) = previous.take() else {
+                pause = if now.values().any(|e| e.temp) { EVERY } else { CALM };
+                previous = Some(now);
                 continue;
-            }
-            for event in diff(&previous, &now, &folder, elapsed) {
+            };
+            let changes = diff(&before, &now, &folder, elapsed, &|name| from_web(&folder, name));
+            for event in changes.events {
                 let _ = app.emit_to(WINDOW_LABEL, "download", event);
             }
-            previous = now;
+            waiting.retain(|name, left| {
+                let Some(entry) = now.get(name).filter(|e| e.size > 0) else { return false };
+                if from_web(&folder, name) {
+                    let _ = app.emit_to(WINDOW_LABEL, "download", done(name, entry.size, &folder));
+                    return false;
+                }
+                *left -= 1;
+                *left > 0
+            });
+            for name in changes.unmarked {
+                waiting.insert(name, MARK_CHECKS);
+            }
+            pause = if now.values().any(|e| e.temp) || !waiting.is_empty() { EVERY } else { CALM };
+            previous = Some(now);
         }
     });
 }
@@ -236,10 +278,18 @@ mod tests {
         Entry { size, temp }
     }
 
-    fn states(events: &[Download]) -> Vec<(String, &'static str)> {
-        let mut v: Vec<_> = events.iter().map(|d| (d.name.clone(), d.state)).collect();
+    fn states(changes: &Changes) -> Vec<(String, &'static str)> {
+        let mut v: Vec<_> = changes.events.iter().map(|d| (d.name.clone(), d.state)).collect();
         v.sort();
         v
+    }
+
+    fn web(_: &str) -> bool {
+        true
+    }
+
+    fn local(_: &str) -> bool {
+        false
     }
 
     #[test]
@@ -247,7 +297,7 @@ mod tests {
         let folder = Path::new(r"C:\Downloads");
         let before = HashMap::from([("film.mkv.crdownload".to_string(), entry(900, true))]);
         let after = HashMap::from([("film.mkv".to_string(), entry(1000, false))]);
-        assert_eq!(states(&diff(&before, &after, folder, 1.0)), vec![("film.mkv".to_string(), "done")]);
+        assert_eq!(states(&diff(&before, &after, folder, 1.0, &local)), vec![("film.mkv".to_string(), "done")]);
     }
 
     #[test]
@@ -255,7 +305,7 @@ mod tests {
         let folder = Path::new(r"C:\Downloads");
         let before = HashMap::from([("doc.pdf".to_string(), entry(0, false)), ("doc.pdf.part".to_string(), entry(500, true))]);
         let after = HashMap::from([("doc.pdf".to_string(), entry(800, false))]);
-        assert_eq!(states(&diff(&before, &after, folder, 1.0)), vec![("doc.pdf".to_string(), "done")]);
+        assert_eq!(states(&diff(&before, &after, folder, 1.0, &web)), vec![("doc.pdf".to_string(), "done")]);
     }
 
     #[test]
@@ -263,7 +313,7 @@ mod tests {
         let folder = Path::new(r"C:\Downloads");
         let before = HashMap::from([("Unconfirmed 4242.crdownload".to_string(), entry(100, true))]);
         let after = HashMap::from([("setup.zip.crdownload".to_string(), entry(200, true))]);
-        assert_eq!(states(&diff(&before, &after, folder, 1.0)), vec![("setup.zip".to_string(), "active")]);
+        assert_eq!(states(&diff(&before, &after, folder, 1.0, &web)), vec![("setup.zip".to_string(), "active")]);
     }
 
     #[test]
@@ -271,6 +321,31 @@ mod tests {
         let folder = Path::new(r"C:\Downloads");
         let before = HashMap::from([("gros.iso.crdownload".to_string(), entry(100, true))]);
         let after = HashMap::new();
-        assert_eq!(states(&diff(&before, &after, folder, 1.0)), vec![("gros.iso".to_string(), "cancelled")]);
+        assert_eq!(states(&diff(&before, &after, folder, 1.0, &web)), vec![("gros.iso".to_string(), "cancelled")]);
+    }
+
+    #[test]
+    fn a_small_download_without_a_partial_file_needs_the_web_mark() {
+        let folder = Path::new(r"C:\Downloads");
+        let before = HashMap::from([("old.txt".to_string(), entry(10, false))]);
+        let after = HashMap::from([("old.txt".to_string(), entry(10, false)), ("facture.pdf".to_string(), entry(5000, false))]);
+        assert_eq!(states(&diff(&before, &after, folder, 1.0, &web)), vec![("facture.pdf".to_string(), "done")]);
+        let saved = diff(&before, &after, folder, 1.0, &local);
+        assert!(saved.events.is_empty());
+        assert_eq!(saved.unmarked, vec!["facture.pdf".to_string()]);
+    }
+
+    #[test]
+    fn the_web_mark_is_read_from_the_zone_stream() {
+        let dir = std::env::temp_dir().join(format!("tako-dl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("saved.txt"), b"x").unwrap();
+        std::fs::write(dir.join("got.txt"), b"x").unwrap();
+        let marked = std::fs::write(dir.join("got.txt:Zone.Identifier"), b"[ZoneTransfer]\r\nZoneId=3\r\n").is_ok();
+        assert!(!from_web(&dir, "saved.txt"));
+        if marked {
+            assert!(from_web(&dir, "got.txt"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

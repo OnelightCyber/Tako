@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -31,12 +31,13 @@ const MAX_SPEECH: usize = 600;
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static LISTENING: AtomicBool = AtomicBool::new(false);
 static STOPPING: AtomicBool = AtomicBool::new(false);
-static CANCEL: AtomicBool = AtomicBool::new(false);
+static NEXT: AtomicU64 = AtomicU64::new(0);
+static CANCEL_UPTO: AtomicU64 = AtomicU64::new(0);
 static TX: OnceLock<Mutex<Sender<Command>>> = OnceLock::new();
 
 enum Command {
     Enable(bool),
-    Listen,
+    Listen(u64),
     Restart,
 }
 
@@ -51,13 +52,14 @@ pub struct Heard {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Final {
+    pub id: u64,
     pub text: String,
     pub error: Option<String>,
 }
 
 impl Final {
-    fn failed(error: &str) -> Final {
-        Final { text: String::new(), error: Some(error.to_string()) }
+    fn failed(id: u64, error: &str) -> Final {
+        Final { id, text: String::new(), error: Some(error.to_string()) }
     }
 }
 
@@ -73,15 +75,22 @@ pub fn set_enabled(on: bool) {
     }
 }
 
-pub fn listen() {
-    CANCEL.store(false, Ordering::Relaxed);
-    send(Command::Listen);
+pub fn listen() -> u64 {
+    let id = NEXT.fetch_add(1, Ordering::SeqCst) + 1;
+    send(Command::Listen(id));
+    id
 }
 
 pub fn cancel() {
-    if LISTENING.load(Ordering::Relaxed) {
-        CANCEL.store(true, Ordering::Relaxed);
-    }
+    CANCEL_UPTO.fetch_max(NEXT.load(Ordering::SeqCst), Ordering::SeqCst);
+}
+
+fn canceled(id: u64) -> bool {
+    stale(id, NEXT.load(Ordering::SeqCst), CANCEL_UPTO.load(Ordering::SeqCst))
+}
+
+pub fn stale(id: u64, newest: u64, canceled_upto: u64) -> bool {
+    canceled_upto >= id || newest > id
 }
 
 pub fn kind_of(tag: &str) -> &'static str {
@@ -115,10 +124,31 @@ fn ticks(seconds: f64) -> TimeSpan {
 struct Wake {
     recognizer: SpeechRecognizer,
     session: SpeechContinuousRecognitionSession,
+    heard: i64,
+    completed: i64,
+}
+
+impl Wake {
+    fn close(self) {
+        let _ = self.session.RemoveResultGenerated(self.heard);
+        let _ = self.session.RemoveCompleted(self.completed);
+        let _ = self.session.StopAsync().and_then(|op| op.get());
+        let _ = self.recognizer.Close();
+    }
 }
 
 fn wake(app: &AppHandle, tx: Sender<Command>) -> windows::core::Result<Wake> {
     let recognizer = SpeechRecognizer::Create(&language()?)?;
+    match prepare(app, tx, &recognizer) {
+        Ok((session, heard, completed)) => Ok(Wake { recognizer, session, heard, completed }),
+        Err(err) => {
+            let _ = recognizer.Close();
+            Err(err)
+        }
+    }
+}
+
+fn prepare(app: &AppHandle, tx: Sender<Command>, recognizer: &SpeechRecognizer) -> windows::core::Result<(SpeechContinuousRecognitionSession, i64, i64)> {
     let constraints = recognizer.Constraints()?;
     for (tag, words) in [("wake", WAKE), ("yes", YES), ("no", NO), ("stop", STOP)] {
         constraints.Append(&SpeechRecognitionListConstraint::CreateWithTag(&phrases(words), &HSTRING::from(tag))?)?;
@@ -130,7 +160,7 @@ fn wake(app: &AppHandle, tx: Sender<Command>) -> windows::core::Result<Wake> {
     let session = recognizer.ContinuousRecognitionSession()?;
     session.SetAutoStopSilenceTimeout(ticks(24.0 * 3600.0))?;
     let emitter = app.clone();
-    session.ResultGenerated(&TypedEventHandler::new(
+    let heard = session.ResultGenerated(&TypedEventHandler::new(
         move |_: Ref<SpeechContinuousRecognitionSession>, args: Ref<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
             if let Some(args) = args.as_ref() {
                 let result = args.Result()?;
@@ -145,25 +175,38 @@ fn wake(app: &AppHandle, tx: Sender<Command>) -> windows::core::Result<Wake> {
             Ok(())
         },
     ))?;
-    session.Completed(&TypedEventHandler::new(
+    let completed = match session.Completed(&TypedEventHandler::new(
         move |_: Ref<SpeechContinuousRecognitionSession>, _: Ref<SpeechContinuousRecognitionCompletedEventArgs>| {
             if ENABLED.load(Ordering::Relaxed) && !LISTENING.load(Ordering::Relaxed) && !STOPPING.load(Ordering::Relaxed) {
                 let _ = tx.send(Command::Restart);
             }
             Ok(())
         },
-    ))?;
-    session.StartAsync()?.get()?;
-    Ok(Wake { recognizer, session })
+    )) {
+        Ok(token) => token,
+        Err(err) => {
+            let _ = session.RemoveResultGenerated(heard);
+            return Err(err);
+        }
+    };
+    if let Err(err) = session.StartAsync().and_then(|op| op.get()) {
+        let _ = session.RemoveResultGenerated(heard);
+        let _ = session.RemoveCompleted(completed);
+        return Err(err);
+    }
+    Ok((session, heard, completed))
 }
 
-fn listen_once(app: &AppHandle) -> Final {
+fn listen_once(app: &AppHandle, id: u64) -> Final {
+    if canceled(id) {
+        return Final::failed(id, "canceled");
+    }
     if !stt::cpu_ok() {
-        return Final::failed("cpu");
+        return Final::failed(id, "cpu");
     }
     if !stt::installed() {
         stt::start_download(app.clone());
-        return Final::failed("model");
+        return Final::failed(id, "model");
     }
     std::thread::spawn(|| {
         let _ = stt::ensure_loaded();
@@ -171,16 +214,18 @@ fn listen_once(app: &AppHandle) -> Final {
     let code = stt::whisper_language(&language_tag());
     let (tx, rx) = channel::<Vec<f32>>();
     let partial = app.clone();
+    let finished = Arc::new(AtomicBool::new(false));
+    let over = finished.clone();
     let worker = std::thread::spawn(move || {
         while let Ok(mut audio) = rx.recv() {
             while let Ok(newer) = rx.try_recv() {
                 audio = newer;
             }
-            if CANCEL.load(Ordering::Relaxed) {
+            if over.load(Ordering::SeqCst) || canceled(id) {
                 continue;
             }
             if let Ok(text) = stt::transcribe(&audio, code) {
-                if !text.is_empty() {
+                if !text.is_empty() && !over.load(Ordering::SeqCst) {
                     let _ = partial.emit_to(WINDOW_LABEL, "voice-partial", text);
                 }
             }
@@ -189,7 +234,7 @@ fn listen_once(app: &AppHandle) -> Final {
     let ready = app.clone();
     let level = app.clone();
     let recording = mic::record(
-        &CANCEL,
+        || canceled(id),
         || {
             let _ = ready.emit_to(WINDOW_LABEL, "voice-ready", ());
         },
@@ -200,23 +245,24 @@ fn listen_once(app: &AppHandle) -> Final {
             let _ = tx.send(audio.to_vec());
         },
     );
+    finished.store(true, Ordering::SeqCst);
     drop(tx);
     let _ = worker.join();
-    if CANCEL.load(Ordering::Relaxed) {
-        return Final::failed("canceled");
+    if canceled(id) {
+        return Final::failed(id, "canceled");
     }
     match recording {
         Err(err) => {
             log::line(format!("voice: microphone ({err})"));
-            Final::failed("microphone")
+            Final::failed(id, "microphone")
         }
-        Ok(r) if !r.heard => Final::failed("silence"),
+        Ok(r) if !r.heard => Final::failed(id, "silence"),
         Ok(r) => {
             let _ = app.emit_to(WINDOW_LABEL, "voice-busy", ());
             match stt::transcribe(&r.samples, code) {
-                Ok(text) if text.is_empty() => Final::failed("unclear"),
-                Ok(text) => Final { text, error: None },
-                Err(err) => Final::failed(&err),
+                Ok(text) if text.is_empty() => Final::failed(id, "unclear"),
+                Ok(text) => Final { id, text, error: None },
+                Err(err) => Final::failed(id, &err),
             }
         }
     }
@@ -225,8 +271,7 @@ fn listen_once(app: &AppHandle) -> Final {
 fn stop(current: &mut Option<Wake>) {
     if let Some(w) = current.take() {
         STOPPING.store(true, Ordering::Relaxed);
-        let _ = w.session.StopAsync().and_then(|op| op.get());
-        drop(w.recognizer);
+        w.close();
         STOPPING.store(false, Ordering::Relaxed);
     }
 }
@@ -271,18 +316,22 @@ fn run(app: AppHandle, rx: Receiver<Command>, tx: Sender<Command>) {
             Some(Command::Enable(false)) => stop(&mut current),
             Some(Command::Enable(true)) => wait = Duration::from_secs(20),
             Some(Command::Restart) => stop(&mut current),
-            Some(Command::Listen) => {
+            Some(Command::Listen(id)) => {
+                if canceled(id) {
+                    continue;
+                }
                 stop(&mut current);
                 LISTENING.store(true, Ordering::Relaxed);
-                let heard = listen_once(&app);
+                let heard = listen_once(&app, id);
                 LISTENING.store(false, Ordering::Relaxed);
-                CANCEL.store(false, Ordering::Relaxed);
                 if let Some(error) = &heard.error {
                     if error != "silence" && error != "canceled" {
                         log::line(format!("voice: listening ended ({error})"));
                     }
                 }
-                let _ = app.emit_to(WINDOW_LABEL, "voice-final", heard);
+                if !canceled(id) {
+                    let _ = app.emit_to(WINDOW_LABEL, "voice-final", heard);
+                }
             }
             None => stt::unload_idle(),
         }
@@ -343,6 +392,15 @@ fn windows_say(text: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancel_or_a_newer_request_makes_a_flow_stale() {
+        assert!(!stale(3, 3, 2));
+        assert!(stale(3, 3, 3));
+        assert!(stale(2, 3, 0));
+        assert!(stale(3, 4, 0));
+        assert!(!stale(4, 4, 3));
+    }
 
     #[test]
     fn constraint_tags_map_to_kinds() {

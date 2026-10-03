@@ -1,6 +1,6 @@
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -11,13 +11,13 @@ const START_TIMEOUT: Duration = Duration::from_secs(90);
 const CHROME_TIMEOUT: Duration = Duration::from_secs(20);
 
 struct Server {
-    pid: u32,
+    child: Child,
     port: u16,
     cdp: u16,
 }
 
 struct Chrome {
-    pid: Option<u32>,
+    child: Option<Child>,
     port: u16,
     visible: bool,
 }
@@ -73,13 +73,23 @@ fn save_port(port: u16) {
     let _ = std::fs::write(port_file(), port.to_string());
 }
 
-fn kill_tree(pid: u32) {
+fn kill_tree(child: &mut Child) -> bool {
+    if !matches!(child.try_wait(), Ok(None)) {
+        return false;
+    }
     let _ = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .status();
+    for _ in 0..20 {
+        if !matches!(child.try_wait(), Ok(None)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    true
 }
 
 impl Browser {
@@ -111,12 +121,12 @@ impl Browser {
             Some(port) => port,
             None => saved_port(),
         };
-        let known = self.chrome.lock().unwrap().as_ref().map(|c| (c.port, c.visible, c.pid));
+        let known = self.chrome.lock().unwrap().as_ref().map(|c| (c.port, c.visible, c.child.is_some()));
         if port_open(cdp).await {
-            let mismatch = matches!(known, Some((port, was_visible, Some(_))) if port == cdp && was_visible != visible);
+            let mismatch = matches!(known, Some((port, was_visible, true)) if port == cdp && was_visible != visible);
             if !mismatch || !launch {
                 if known.map(|k| k.0) != Some(cdp) {
-                    *self.chrome.lock().unwrap() = Some(Chrome { pid: None, port: cdp, visible });
+                    *self.chrome.lock().unwrap() = Some(Chrome { child: None, port: cdp, visible });
                 }
                 return Ok(true);
             }
@@ -144,7 +154,7 @@ impl Browser {
         if let Some(port) = active_port(&profile_dir()) {
             if port_open(port).await {
                 save_port(port);
-                *self.chrome.lock().unwrap() = Some(Chrome { pid: None, port, visible: true });
+                *self.chrome.lock().unwrap() = Some(Chrome { child: None, port, visible: true });
                 log::line(format!("browser: reusing the open window (debug port {port})"));
                 return Ok(port);
             }
@@ -171,13 +181,13 @@ impl Browser {
             cmd.arg("--headless=new");
         }
         cmd.arg("about:blank").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        let child = cmd.spawn().map_err(|e| format!("Impossible de lancer le navigateur : {e}"))?;
-        let pid = child.id();
+        let mut child = Some(cmd.spawn().map_err(|e| format!("Impossible de lancer le navigateur : {e}"))?);
+        let pid = child.as_ref().map(|c| c.id()).unwrap_or(0);
         log::line(format!("browser: launched {} (pid {pid}, debug port {port})", exe.display()));
         let deadline = tokio::time::Instant::now() + CHROME_TIMEOUT;
         while tokio::time::Instant::now() < deadline {
             if port_open(port).await {
-                *self.chrome.lock().unwrap() = Some(Chrome { pid: Some(pid), port, visible });
+                *self.chrome.lock().unwrap() = Some(Chrome { child: child.take(), port, visible });
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -208,7 +218,7 @@ impl Browser {
             .creation_flags(CREATE_NO_WINDOW);
         let child = cmd.spawn().map_err(|e| format!("Impossible de démarrer le navigateur : {e}"))?;
         let pid = child.id();
-        *self.server.lock().unwrap() = Some(Server { pid, port, cdp });
+        *self.server.lock().unwrap() = Some(Server { child, port, cdp });
         log::line(format!("browser server starting on port {port} (pid {pid}, chrome {cdp})"));
 
         let deadline = tokio::time::Instant::now() + START_TIMEOUT;
@@ -224,16 +234,18 @@ impl Browser {
     }
 
     pub fn stop(&self) {
-        let Some(run) = self.server.lock().unwrap().take() else { return };
-        kill_tree(run.pid);
+        let Some(mut run) = self.server.lock().unwrap().take() else { return };
+        kill_tree(&mut run.child);
         log::line(format!("browser server on port {} stopped", run.port));
     }
 
     pub fn close_chrome(&self) {
         let Some(chrome) = self.chrome.lock().unwrap().take() else { return };
-        if let Some(pid) = chrome.pid {
-            kill_tree(pid);
-            log::line(format!("browser window closed (pid {pid})"));
+        if let Some(mut child) = chrome.child {
+            let pid = child.id();
+            if kill_tree(&mut child) {
+                log::line(format!("browser window closed (pid {pid})"));
+            }
         }
     }
 }

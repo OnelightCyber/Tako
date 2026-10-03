@@ -1,5 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Media::Audio::{
     eCapture, eConsole, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT,
@@ -16,6 +15,8 @@ const MIN_SPEECH_FRAMES: u32 = 12;
 const MAX_SPEECH_FRAMES: u32 = 14 * 50;
 const START_FRAMES: u32 = 3;
 const WAVE_FORMAT_PCM: u16 = 1;
+const MAX_RECORDING: Duration = Duration::from_secs(25);
+const NO_PACKETS: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Step {
@@ -198,7 +199,7 @@ impl Source {
 }
 
 pub fn record(
-    stop: &AtomicBool,
+    stop: impl Fn() -> bool,
     mut on_ready: impl FnMut(),
     mut on_level: impl FnMut(f32),
     mut on_speech: impl FnMut(&[f32]),
@@ -214,9 +215,16 @@ pub fn record(
     let mut peak = 0.0f32;
     let mut meter = 0u32;
     let mut since_partial = 0u32;
+    let started = Instant::now();
+    let mut last_packet = Instant::now();
     let result = loop {
-        if stop.load(Ordering::Relaxed) {
+        if stop() {
             break Ok(Recording { samples: Vec::new(), heard: false });
+        }
+        if started.elapsed() > MAX_RECORDING {
+            let heard = detector.started() && cursor > start_at;
+            let samples = if heard { audio[start_at..cursor.min(audio.len())].to_vec() } else { Vec::new() };
+            break Ok(Recording { samples, heard });
         }
         std::thread::sleep(Duration::from_millis(15));
         raw.clear();
@@ -224,8 +232,12 @@ pub fn record(
             break Err(err);
         }
         if raw.is_empty() {
+            if last_packet.elapsed() > NO_PACKETS {
+                break Err("no audio".to_string());
+            }
             continue;
         }
+        last_packet = Instant::now();
         let converted = if source.channels == 1 && source.rate == RATE { std::mem::take(&mut raw) } else { to_mono_16k(&raw, source.channels, source.rate) };
         audio.extend_from_slice(&converted);
         let mut finished = None;
